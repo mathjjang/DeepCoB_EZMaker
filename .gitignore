@@ -18,6 +18,7 @@ Thumbs.db
 # SSH keys (DO NOT COMMIT)
 key.txt
 key.txt.pub
+github_deepco_exmaker_key.txt
 *.pem
 *.key
 id_ed25519
