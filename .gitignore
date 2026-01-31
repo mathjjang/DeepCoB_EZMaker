@@ -15,6 +15,16 @@ Thumbs.db
 # Cursor
 .cursor/
 
+# SSH keys (DO NOT COMMIT)
+key.txt
+key.txt.pub
+*.pem
+*.key
+id_ed25519
+id_ed25519.pub
+id_rsa
+id_rsa.pub
+
 # Build artifacts
 *.mpy
 mpy/
