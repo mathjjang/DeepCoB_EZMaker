@@ -29,6 +29,8 @@
   - **스트리밍 종료 정리 강화**: `CAM:STREAM:OFF`/disconnect 시 전송 상태를 정리하여 호스트 파서가 중간 상태로 멈추지 않도록 처리
 
 - **웹(Web Bluetooth) 테스트 라이브러리 성능/디버깅 개선** (`IoTmode/test/integratedBleLib_Camera.js`)
+  - **카메라 수신 경로 단일화**: 카메라(`CAM_CHARACTERISTIC`)는 `characteristicvaluechanged`(알림 이벤트) 경로만 사용하고,
+    `onDataReceived`(중앙 디스패치) 경로는 비활성화하여 환경에 따른 “중복 청크 처리(2중 처리)” 가능성을 제거
   - **로그 레벨(3단계) 도입**: `none / info / debug`
     - **`none`**: 로그 완전 비활성(카메라 스트리밍/대량 notify에서 성능 우선)
     - **`info`**: 프레임 단위 요약 중심(예: `SIZE`, 프레임 완료, 이미지 조립 완료)
