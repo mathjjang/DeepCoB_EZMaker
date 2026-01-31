@@ -2,10 +2,10 @@
 
 ## 간략 버전 정보 (Summary)
 
-| Version | Date | Summary |
-|---|---|---|
-| **v1.3.7** | - | **카메라 스트리밍 비동기화**: 캡처는 스레드로 분리하고, BLE 전송은 메인 루프에서 청크 단위로 분산 처리하여 버저/센서 명령 응답성을 개선 |
-| **v1.3.6** | - | **초기 공개 버전(기준선)**: EZMaker 센서/액츄에이터 + BLE 명령 + 웹(Web Bluetooth) 테스트/블록 연동 기반을 정리 |
+| Version | Date | Summary | Key changed files |
+|---|---|---|---|
+| **v1.3.7** | - | **카메라 스트리밍 비동기화**: 캡처는 스레드로 분리하고, BLE 전송은 메인 루프에서 청크 단위로 분산 처리하여 버저/센서 명령 응답성을 개선 | `source/lib/bleIoT.py`, `IoTmode/test/integratedBleLib_Camera.js`, `CHANGELOG.md`, `VERSION`, `source/config.py`, `README.md` |
+| **v1.3.6** | - | **초기 공개 버전(기준선)**: EZMaker 센서/액츄에이터 + BLE 명령 + 웹(Web Bluetooth) 테스트/블록 연동 기반을 정리 | `source/lib/bleBaseIoT.py`, `source/lib/bleIoT.py`, `IoTmode/test/integratedBleLib_Camera.js`, `EZMaker_블록코드정의.md`, `EZMaker프로젝트.md` |
 
 > Date는 릴리즈 노트에서 확정해 채워 넣을 수 있습니다.
 

@@ -10,4 +10,3 @@ DeepCo Board v2.0(ESP32-S3) + EZMAKER Shield v2.0 환경에서 MicroPython 펌�
 ## Version history
 
 See `CHANGELOG.md`.
-

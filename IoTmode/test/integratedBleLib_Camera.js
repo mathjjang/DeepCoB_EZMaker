@@ -3,6 +3,15 @@
 'use strict';
 
 // -----------------------------------------
+// Library version
+// -----------------------------------------
+// NOTE:
+// - 이 버전은 "이 JS 파일 자체"의 버전입니다(펌웨어/저장소 버전과는 별개).
+// - 필요 시 여기만 변경하면 됩니다.
+const EZ_LIB_VERSION = '1.3.7';
+try { if (typeof window !== 'undefined') window.EZ_LIB_VERSION = EZ_LIB_VERSION; } catch (e) { /* ignore */ }
+
+// -----------------------------------------
 // Logging (none / info / debug)
 // - none : 로그 없음
 // - info : 사용자에게 유의미한 요약 로그
@@ -1025,11 +1034,14 @@ class SensorBase {
      * @param {string} name - 센서 이름
      * @param {string} characteristicUUID - 센서 특성 UUID
      */
-    constructor(name, characteristicUUID) {
+    constructor(name, characteristicUUID, options = {}) {
         // super();
 
         this.name = name;
         this.characteristicUUID = characteristicUUID;
+        // 고빈도 데이터(카메라 등)는 중앙 디스패치(onDataReceived) 경로를 끄고,
+        // characteristicvaluechanged(알림 이벤트) 한 경로만 타도록 할 수 있다.
+        this._useCentralOnDataReceived = (options.useCentralOnDataReceived !== false);
 
         // BLEManager 인스턴스 가져오기
         this.bleManager = BLEManager.getInstance();
@@ -1102,13 +1114,16 @@ class SensorBase {
                 EZ_LOG.warn(`[DEBUG] ${self.name}: 특성 알림 시작 실패`);
             });
 
-            // 기존 onDataReceived도 유지
-            this.bleManager.onDataReceived(function (data) {
-                if (data.characteristicUUID === self.characteristicUUID) {
-                    EZ_LOG.debug(`[DEBUG] ${self.name} onDataReceived 콜백 호출됨`);
-                    self._processData(data); // 데이터 형식 일관성 유지
-                }
-            });
+            // 기존 onDataReceived도 유지 (선택)
+            // NOTE: 카메라처럼 고빈도 스트림은 중복 처리 가능성을 줄이기 위해 비활성화 권장
+            if (this._useCentralOnDataReceived) {
+                this.bleManager.onDataReceived(function (data) {
+                    if (data.characteristicUUID === self.characteristicUUID) {
+                        EZ_LOG.debug(`[DEBUG] ${self.name} onDataReceived 콜백 호출됨`);
+                        self._processData(data); // 데이터 형식 일관성 유지
+                    }
+                });
+            }
         } catch (error) {
             EZ_LOG.error(`[DEBUG] ${this.name}: 알림 설정 중 오류`);
         }
@@ -2243,7 +2258,10 @@ class Camera extends SensorBase {
      * 카메라 클래스 생성자
      */
     constructor() {
-        super('Camera', CAM_CHARACTERISTIC);
+        // 카메라는 notify 빈도가 매우 높으므로,
+        // onDataReceived(중앙 디스패치)까지 같이 타면 환경에 따라 중복 처리될 수 있음.
+        // 따라서 characteristicvaluechanged 경로만 사용하도록 중앙 디스패치 경로를 끈다.
+        super('Camera', CAM_CHARACTERISTIC, { useCentralOnDataReceived: false });
 
         // 카메라 상태 및 이미지 관련 변수
         this.isStreaming = false;
