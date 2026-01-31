@@ -18,4 +18,4 @@ CRITICAL = 50
 
 current_level = INFO
 
-firmware_source = "1.3.6"
+firmware_source = "1.3.7"

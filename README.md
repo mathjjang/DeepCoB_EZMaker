@@ -4,6 +4,6 @@ DeepCo Board v2.0(ESP32-S3) + EZMAKER Shield v2.0 환경에서 MicroPython 펌�
 
 ## Version
 
-- Repo version: `1.3.6` (see `VERSION`)
+- Repo version: `1.3.7` (see `VERSION`)
 - Firmware version string: `source/config.py`의 `firmware_source`
 

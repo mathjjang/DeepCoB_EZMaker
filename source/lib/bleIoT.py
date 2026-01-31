@@ -3261,14 +3261,34 @@ def buzzer_completion_callback(status):
 # ---------------------------
 camera_enabled = False  # 초기값은 False로 설정, 초기화 성공 시 True로 변경
 streaming = False
-# 카메라 성능 최적화를 위한 변수 추가
-last_frame_time = 0
-stream_interval = 300  # 초기 스트리밍 간격 (ms)
+# 카메라 스트리밍 설정
+stream_interval = 300  # 스트리밍 캡처 간격 (ms)
 cam = None            # 카메라 모듈 객체
 
 # 메모리 모니터링 변수
 last_gc_collect = 0
 gc_interval = 5000  # 5초마다 GC 수행
+
+# ---------------------------
+# 카메라 스트리밍 분리(스레드 캡처 + 메인루프 전송)
+# ---------------------------
+# 목표:
+# - 캡처(무거움): 별도 스레드에서 수행
+# - BLE 전송(notify): 메인 루프에서 "조금씩" 처리하여 다른 센서/버저 명령 지연을 줄임
+CAM_CHUNK_SIZE = 160
+CAM_TX_MAX_CHUNKS_PER_TICK = 3  # 메인 루프 한 번에 보낼 청크 수(응답성/속도 트레이드오프)
+
+_cam_lock = _thread.allocate_lock()
+_cam_pending_frame = None          # 최신 프레임 1개만 유지 (큐 폭주 방지)
+_cam_tx_frame = None               # 현재 전송 중인 프레임
+_cam_tx_offset = 0
+_cam_tx_seq = 0
+_cam_tx_stage = 0                  # 0=idle, 1=sent CAM:START, 2=sent SIZE, 3=sending chunks, 4=sent CAM:END
+_cam_snapshot_requested = False
+
+_cam_worker_started = False
+_cam_worker_stop = False
+_cam_last_capture_ms = 0
 
 # 카메라 초기화 시도
 try:
@@ -3301,60 +3321,162 @@ except Exception as e:
     import machine
     machine.reset()  # 하드 리셋 수행
 
-# 프레임 전송 함수
-def send_frame(frame):
-    logger.debug(f"Sending frame: {len(frame)} bytes", "CAM")
+def _camera_offer_frame(frame):
+    """최신 프레임 1개만 유지하도록 교체."""
+    global _cam_pending_frame
     if not frame:
-        return False
-    
+        return
     try:
-        # JPEG 마커 검증 - CameraModule의 validate_jpeg 사용
-        #if not cam.validate_jpeg(frame):
-        #    logger.warning("Invalid JPEG format", "CAM")
-        #    uart.cam_notify(b"CAM:ERROR")
-        #    return False
-        
-        # 프레임 시작 마커 전송
-        uart.cam_notify(b"CAM:START")
-        time.sleep_ms(5)
-        
-        # 프레임 크기 정보 전송
-        size_info = f"SIZE:{len(frame)}".encode()
-        uart.cam_notify(size_info)
-        time.sleep_ms(5)
-        
-        # 바이너리 데이터를 청크 단위로 전송
-        offset = 0
-        chunk_size = 160  #200  # 160BLE MTU 크기에 맞게 조정
-        length = len(frame)
-        
-        seq_num = 0
-        while offset < length:
-            end = min(offset + chunk_size, length)
-            chunk = frame[offset:end]
-            
-            # 간소화된 헤더: BIN숫자:
-            header = f"BIN{seq_num}:".encode()
-            uart.cam_notify(header + chunk)
-            #print('seq_num',seq_num)
-            logger.debug(f"Frame chunk: seq_num={seq_num}", "CAM")
-            offset = end
-            seq_num += 1
-            
-            time.sleep_ms(5)  # 적은 딜레이
-            
-            # 주기적으로 메모리 확인 및 정리
-            #if seq_num % 10 == 0:  # 10개 청크마다
-            #    gc.collect()
-        
-        # 프레임 종료 마커 전송
-        #time.sleep_ms(10)
-        uart.cam_notify(b"CAM:END")
-        
-        return True
+        with _cam_lock:
+            _cam_pending_frame = frame
     except Exception as e:
-        logger.error(f"Frame send error: {e}", "CAM")
-        return False
+        logger.error(f"Failed to offer camera frame: {e}", "CAM")
+
+def _camera_request_snapshot():
+    global _cam_snapshot_requested
+    _cam_snapshot_requested = True
+
+def _camera_abort_tx():
+    """전송 중 프레임을 중단하고 상태 초기화."""
+    global _cam_tx_frame, _cam_tx_offset, _cam_tx_seq, _cam_tx_stage, _cam_pending_frame
+    try:
+        # 호스트가 프레임 파서를 멈추지 않도록 END는 보내줌(가능할 때만)
+        if uart and ble_connected:
+            uart.cam_notify(b"CAM:END")
+    except Exception:
+        pass
+    with _cam_lock:
+        _cam_tx_frame = None
+        _cam_tx_offset = 0
+        _cam_tx_seq = 0
+        _cam_tx_stage = 0
+        _cam_pending_frame = None
+
+def _camera_tx_pump(max_chunks=CAM_TX_MAX_CHUNKS_PER_TICK):
+    """
+    메인 루프에서 호출: 한 번에 청크 몇 개만 전송하고 빠르게 반환.
+    프로토콜은 기존과 동일:
+      CAM:START -> SIZE:<n> -> BIN{seq}:<bytes>... -> CAM:END
+    """
+    global _cam_tx_frame, _cam_tx_offset, _cam_tx_seq, _cam_tx_stage, _cam_pending_frame
+
+    if not (uart and ble_connected and camera_enabled):
+        return
+
+    # 스트리밍이 꺼졌는데 전송 중이면 중단
+    if not streaming and _cam_tx_stage != 0:
+        _camera_abort_tx()
+        return
+
+    # 전송 중이 아니면 pending에서 가져와 시작
+    if _cam_tx_stage == 0:
+        with _cam_lock:
+            if _cam_pending_frame is None:
+                return
+            _cam_tx_frame = _cam_pending_frame
+            _cam_pending_frame = None
+            _cam_tx_offset = 0
+            _cam_tx_seq = 0
+            _cam_tx_stage = 1
+
+    # Stage 1: START
+    if _cam_tx_stage == 1:
+        try:
+            uart.cam_notify(b"CAM:START")
+            _cam_tx_stage = 2
+        except Exception as e:
+            logger.error(f"Failed to send CAM:START: {e}", "CAM")
+            _camera_abort_tx()
+            return
+
+    # Stage 2: SIZE
+    if _cam_tx_stage == 2:
+        try:
+            size_info = f"SIZE:{len(_cam_tx_frame)}".encode()
+            uart.cam_notify(size_info)
+            _cam_tx_stage = 3
+        except Exception as e:
+            logger.error(f"Failed to send SIZE: {e}", "CAM")
+            _camera_abort_tx()
+            return
+
+    # Stage 3: chunks
+    if _cam_tx_stage == 3:
+        try:
+            length = len(_cam_tx_frame)
+            chunks_sent = 0
+            while _cam_tx_offset < length and chunks_sent < max_chunks:
+                end = min(_cam_tx_offset + CAM_CHUNK_SIZE, length)
+                chunk = _cam_tx_frame[_cam_tx_offset:end]
+                header = f"BIN{_cam_tx_seq}:".encode()
+                uart.cam_notify(header + chunk)
+                _cam_tx_offset = end
+                _cam_tx_seq += 1
+                chunks_sent += 1
+
+            if _cam_tx_offset >= length:
+                _cam_tx_stage = 4
+        except Exception as e:
+            logger.error(f"Frame chunk send error: {e}", "CAM")
+            _camera_abort_tx()
+            return
+
+    # Stage 4: END
+    if _cam_tx_stage == 4:
+        try:
+            uart.cam_notify(b"CAM:END")
+        except Exception:
+            pass
+        # 상태 초기화
+        with _cam_lock:
+            _cam_tx_frame = None
+            _cam_tx_offset = 0
+            _cam_tx_seq = 0
+            _cam_tx_stage = 0
+
+def _camera_worker():
+    """카메라 캡처 전용 스레드."""
+    global _cam_worker_stop, _cam_last_capture_ms, _cam_snapshot_requested
+    logger.info("Camera worker thread started", "CAM")
+    while not _cam_worker_stop:
+        try:
+            if camera_enabled and cam and ble_connected and uart:
+                now = time.ticks_ms()
+
+                # 스냅샷 요청 우선 처리
+                if _cam_snapshot_requested:
+                    _cam_snapshot_requested = False
+                    frame = cam.capture_frame()
+                    if frame:
+                        _camera_offer_frame(frame)
+
+                # 스트리밍 캡처
+                if streaming:
+                    if time.ticks_diff(now, _cam_last_capture_ms) >= stream_interval:
+                        frame = cam.capture_frame()
+                        if frame:
+                            _camera_offer_frame(frame)
+                        _cam_last_capture_ms = now
+        except Exception as e:
+            logger.error(f"Camera worker error: {e}", "CAM")
+            try:
+                gc.collect()
+            except Exception:
+                pass
+
+        time.sleep_ms(10)
+    logger.info("Camera worker thread stopped", "CAM")
+
+def _ensure_camera_worker():
+    global _cam_worker_started
+    if _cam_worker_started:
+        return
+    _cam_worker_started = True
+    try:
+        _thread.start_new_thread(_camera_worker, ())
+    except Exception as e:
+        logger.error(f"Failed to start camera worker thread: {e}", "CAM")
+        _cam_worker_started = False
 
 def cam_handler(conn_handle, cmd_str):
     global streaming, stream_interval
@@ -3366,30 +3488,10 @@ def cam_handler(conn_handle, cmd_str):
         return
 
     if cmd_str == "CAM:SNAP":
-        # 메모리 부족 방지를 위한 GC 실행
-        gc.collect()
-        
-        # CameraModule의 capture_frame 메서드 사용
-        _ = cam.capture_frame()
-        frame = cam.capture_frame()
-        
-        if frame is None:
-            logger.error("Failed to capture frame", "CAM")
-            # 오류 알림을 클라이언트에 전송
-            uart.cam_notify(b"CAM:ERROR")
-            return
-        
-        # 프레임 전송
-        if send_frame(frame):
-            logger.debug(f"Sent snapshot: {len(frame)} bytes", "CAM")
-        else:
-            logger.error("Failed to send snapshot", "CAM")
-        
-        # 메모리 해제를 위한 가비지 컬렉션
-        frame = None
-        gc.collect()
-        # 메모리 사용량 출력
-        print_memory_info()
+        # 스냅샷은 캡처 스레드에서 수행하고, 전송은 메인 루프가 처리
+        _ensure_camera_worker()
+        _camera_request_snapshot()
+        return
         
     elif cmd_str.startswith("CAM:INTERVAL "):
         # 스트리밍 간격 조정 명령
@@ -3409,6 +3511,7 @@ def cam_handler(conn_handle, cmd_str):
             logger.info(f"Received stream ON command, current streaming status: {streaming}", "CAM")
             return
         
+        _ensure_camera_worker()
         streaming = True
         logger.info(f"Streaming enabled, new status: {streaming}", "CAM")
         gc.collect()
@@ -3421,6 +3524,7 @@ def cam_handler(conn_handle, cmd_str):
             # 스트리밍 종료 시 메모리 정리
             gc.collect()
             print_memory_info()
+            _camera_abort_tx()
     else:
         logger.warning(f"Unrecognized camera cmd: {cmd_str}", "CAM")
 
@@ -3529,6 +3633,12 @@ def disconnect_handler(conn_handle):
             dcmotor_pwm.duty(0)  # 모터 정지
     except Exception as e:
         logger.warning(f"Error stopping DC motor: {e}", "MOTOR")
+
+    # 카메라 전송 상태 정리 (중간 프레임 파서가 멈추지 않도록 END 보냄)
+    try:
+        _camera_abort_tx()
+    except Exception:
+        pass
 
 # ---------------------------
 # BLE 시작
@@ -4446,30 +4556,13 @@ try:
             gc.collect()
             last_gc_collect = current_time
         
-        # 카메라 스트리밍 처리
-        #print(f"Streaming: {streaming}, Camera enabled: {camera_enabled}, UART: {uart}, BLE connected: {ble_connected}")
-        if streaming and camera_enabled and uart and ble_connected:  #
-            current_time = time.ticks_ms()
-            if time.ticks_diff(current_time, last_frame_time) >= stream_interval:
-                try:
-                    # 메모리 부족 방지를 위한 GC 실행
-                    gc.collect()
-                    
-                    # CameraModule의 capture_frame 메서드 사용
-                    frame = cam.capture_frame()
-                    
-                    if frame:
-                        if send_frame(frame):
-                            logger.debug(f"Streamed frame: {len(frame)} bytes", "CAM")
-                        frame = None  # 메모리 해제를 위해
-                        
-                    gc.collect()
-                    last_frame_time = time.ticks_ms()
-                except Exception as e:
-                    logger.error(f"Error during streaming: {e}", "CAM")
-                    # 오류 발생 시 메모리 정리
-                    gc.collect()
-                    time.sleep_ms(100)  # 오류 발생 시 짧은 대기
+        # 카메라 처리:
+        # - 캡처는 스레드가 수행
+        # - 전송은 메인 루프에서 조금씩 처리
+        if camera_enabled and uart and ble_connected:
+            if streaming:
+                _ensure_camera_worker()
+            _camera_tx_pump()
         
         # 심장박동 센서 처리
         if heart_rate_streaming and heart_rate_enabled and heart_rate_sensor and heart_rate_monitor and uart and ble_connected:
