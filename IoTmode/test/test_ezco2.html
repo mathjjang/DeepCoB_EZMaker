@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EZMaker CO2 센서(SCD40) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 4px 4px 0;
+        }
+        #values {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px solid #ccc;
+        }
+        #values table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        #values th, #values td {
+            border: 1px solid #ddd;
+            padding: 4px 6px;
+            text-align: center;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 150px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>EZMaker CO2 센서(SCD40) 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="readCo2Btn" disabled>CO2값 읽기</button>
+
+    <div id="values">
+        <table>
+            <tr>
+                <th>CO2 (ppm)</th>
+                <th>온도 (℃)</th>
+                <th>습도 (%RH)</th>
+            </tr>
+            <tr>
+                <td id="co2Val">-</td>
+                <td id="tempVal">-</td>
+                <td id="humVal">-</td>
+            </tr>
+        </table>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn  = document.getElementById('connectBtn');
+        const readCo2Btn  = document.getElementById('readCo2Btn');
+        const co2Val      = document.getElementById('co2Val');
+        const tempVal     = document.getElementById('tempVal');
+        const humVal      = document.getElementById('humVal');
+        const logArea     = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager  = null;
+        let ezCo2Sensor = null;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof EzCo2Sensor === 'undefined' ||
+                typeof getValidEzCo2Value === 'undefined') {
+                log('BLE/EZCO2 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+            if (typeof EZ_I2C_SDA_PIN !== 'number' || typeof EZ_I2C_SCL_PIN !== 'number') {
+                log('I2C 공통 핀 상수(EZ_I2C_SDA_PIN/EZ_I2C_SCL_PIN)가 JS 라이브러리에 정의되어 있지 않습니다.');
+                return;
+            }
+
+            // 블록코드 스타일: 전역 객체 생성
+            bleManager  = BLEManager.getInstance();
+            bleManager.init();
+            ezCo2Sensor = new EzCo2Sensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            readCo2Btn.addEventListener('click', handleReadCo2);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled  = true;
+            readCo2Btn.disabled  = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // I2C 공통 핀 사용
+                log(`EZCO2 센서 핀을 SDA=${EZ_I2C_SDA_PIN}, SCL=${EZ_I2C_SCL_PIN}으로 설정합니다.`);
+                ezCo2Sensor.setPin(EZ_I2C_SDA_PIN, EZ_I2C_SCL_PIN).then(() => {
+                    log('EZCO2 센서 핀 설정 완료');
+                    readCo2Btn.disabled = false;
+                }).catch(err => {
+                    log('EZCO2 센서 핀 설정 실패: ' + err);
+                    connectBtn.disabled = false;
+                });
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleReadCo2() {
+            try {
+                log('EZCO2 센서 측정 요청...');
+
+                const data = await getValidEzCo2Value(ezCo2Sensor);
+
+                co2Val.textContent  = (data.co2  != null) ? data.co2.toFixed(0)     : '-';
+                tempVal.textContent = (data.temp != null) ? data.temp.toFixed(2)    : '-';
+                humVal.textContent  = (data.humidity != null) ? data.humidity.toFixed(2) : '-';
+
+                log(
+                    `측정 완료: CO2=${data.co2} ppm, T=${data.temp} ℃, H=${data.humidity} %RH`
+                );
+            } catch (e) {
+                log('EZCO2 센서 값 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

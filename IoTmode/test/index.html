@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE 테스트 인터페이스</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .control-panel {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button#connectBtn {
+            background-color: #2196F3;
+        }
+        
+        button#connectBtn:hover {
+            background-color: #0b7dda;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        input, textarea {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        #commandInput {
+            flex-grow: 1;
+        }
+        
+        #logOutput {
+            width: 100%;
+            height: 300px;
+            background-color: #f5f5f5;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            overflow-y: auto;
+            resize: vertical;
+        }
+        
+        .connection-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #ff0000;
+            margin-right: 5px;
+        }
+        
+        .connection-status.connected {
+            background-color: #00ff00;
+        }
+        
+        .status-bar {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        
+        .flex-row {
+            display: flex;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BLE 테스트 인터페이스</h1>
+        
+        <div class="flex-row">
+            <button id="connectBtn">블루투스 연결</button>
+            <button id="disconnectBtn" disabled>연결 해제</button>
+        </div>
+        
+        <div class="control-panel">
+            <input type="text" id="commandInput" placeholder="블루투스 명령어 입력 (예: LED:ON)">
+            <button id="sendBtn" disabled>전송</button>
+        </div>
+        
+        <div>
+            <h3>로그 출력</h3>
+            <div id="logOutput"></div>
+        </div>
+        
+        <div class="status-bar">
+            <span class="connection-status" id="statusIndicator"></span>
+            <span id="statusText">연결 안됨</span>
+        </div>
+    </div>
+
+    <!-- 스크립트 로드 -->
+    <script src="integratedBleLib.js"></script>
+    
+    <script>
+        // DOM 요소
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const commandInput = document.getElementById('commandInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const logOutput = document.getElementById('logOutput');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        
+        // 센서 객체들을 전역으로 선언
+        let bleConnection;   // BLE 연결 관리 객체
+        let led;             // LED 제어 (켜기/끄기/깜빡임/밝기 조절)
+        let lightSensor;     // 조도센서 (빛 감지)
+        let ultrasonicSensor; // 초음파 센서 (거리 측정)
+        let dhtSensor;       // 온습도 센서 (온도/습도 측정)
+        let touchSensor;     // 터치 센서 (접촉 감지)
+        let servoMotor;      // 서보 모터 (각도 제어)
+        
+        // 로그 출력 함수
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            let prefix = '';
+            
+            switch(type) {
+                case 'error':
+                    prefix = '❌ 오류: ';
+                    break;
+                case 'success':
+                    prefix = '✅ 성공: ';
+                    break;
+                case 'command':
+                    prefix = '📤 명령어: ';
+                    break;
+                case 'response':
+                    prefix = '📥 응답: ';
+                    break;
+                case 'warning':
+                    prefix = '⚠️ 경고: ';
+                    break;
+                default:
+                    prefix = 'ℹ️ 정보: ';
+            }
+            
+            logOutput.innerHTML += `[${timestamp}] ${prefix}${message}\n`;
+            logOutput.scrollTop = logOutput.scrollHeight; // 자동 스크롤
+        }
+        
+        // 연결 상태 업데이트 함수
+        function updateConnectionStatus(connected) {
+            if (connected === true || connected === 'connected') {
+                statusIndicator.classList.add('connected');
+                statusText.textContent = '연결됨';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendBtn.disabled = false;
+            } else {
+                statusIndicator.classList.remove('connected');
+                statusText.textContent = '연결 안됨';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                sendBtn.disabled = true;
+            }
+        }
+        
+        // 로그 함수 전역으로 내보내기
+        window.log = log;
+
+        // 페이지 로드 시 모든 초기화 및 이벤트 리스너 등록
+        window.addEventListener('load', function() {
+            console.log('페이지 완전히 로드됨, 초기화 시작');
+            log('페이지 로드 완료', 'info');
+
+            // 상수 및 BLE 라이브러리 로드 확인
+            if (typeof IOT_SERVICE === 'undefined' || typeof BLEManager === 'undefined') {
+                log('BLE 라이브러리 로딩 실패. 페이지를 새로고침 해보세요.', 'error');
+                return;
+            }
+            
+            log('BLE 라이브러리 로드 성공', 'success');
+            
+            try {
+                // 센서 객체들 초기화 (페이지 완전히 로드된 후)
+                bleConnection = new BLEManager();       // BLE 연결 관리자 생성
+                log('BLE 연결 관리자 초기화 완료', 'info');
+                
+                // BLE 관리자 초기화
+                bleConnection.init();
+                log('BLEManager 초기화 완료', 'info');
+                
+                // 센서 객체 생성
+                led = new LED();                       // LED 제어 클래스 생성
+                lightSensor = new LightSensor();       // 조도센서 클래스 생성
+                ultrasonicSensor = new UltrasonicSensor(); // 초음파 센서 클래스 생성
+                dhtSensor = new DHTSensor();           // 온습도 센서 클래스 생성
+                touchSensor = new TouchSensor();       // 터치 센서 클래스 생성
+                servoMotor = new ServoMotor();         // 서보 모터 클래스 생성
+                log('센서 객체 초기화 완료', 'success');
+                
+                // 전역 변수로 등록 (필요에 따라 접근 가능하도록)
+                window.bleConnection = bleConnection;
+                window.led = led;
+                window.lightSensor = lightSensor;
+                window.ultrasonicSensor = ultrasonicSensor;
+                window.dhtSensor = dhtSensor;
+                window.touchSensor = touchSensor;
+                window.servoMotor = servoMotor;
+                
+                // BleLib 전역 리스너 설정
+                window.BleLib.onDataReceived(function(data) {
+                    console.log("=== BLE 데이터 수신됨(전역) ===");
+                    console.log("UUID:", data.characteristicUUID);
+                    console.log("데이터:", data.data);
+                    
+                    // 조도센서 관련 디버깅
+                    if (data.characteristicUUID === LIGHT_CHARACTERISTIC) {
+                        console.log("조도센서 데이터 감지됨!");
+                        log(`🔍 BLE 조도센서 데이터 감지됨 (전역 리스너)`, 'info');
+                    }
+                });
+                
+                // 브라우저 블루투스 지원 확인
+                if (!navigator.bluetooth) {
+                    log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.', 'error');
+                    log('Chrome 또는 Edge 브라우저를 사용해주세요.', 'error');
+                    connectBtn.disabled = true;
+                } else {
+                    log('Web Bluetooth API 지원됨', 'success');
+                    log('실행 환경: ' + (window.isSecureContext ? 'Secure Context (OK)' : 'Not Secure Context (Problem)'), 'info');
+                    if (!window.isSecureContext) {
+                        log('블루투스 API는 HTTPS 또는 localhost에서만 작동합니다', 'error');
+                    }
+                }
+                
+                // 이제 모든 객체가 초기화된 후에 이벤트 리스너 등록
+                initEventListeners();
+                
+                log('블루투스 연결 버튼을 눌러 장치에 연결하세요', 'info');
+            } catch (error) {
+                log(`초기화 중 오류 발생: ${error.message}`, 'error');
+                console.error('초기화 오류:', error);
+            }
+        });
+        
+        // 모든 이벤트 리스너 초기화 함수
+        function initEventListeners() {
+            // LED 센서 데이터 이벤트 리스너
+            led.onData(function(data) {
+                log(`LED 상태: ${data.state}, 성공: ${data.success}`, 'response');
+            });
+            
+            // 조도센서 데이터 이벤트 리스너
+            lightSensor.onData(function(data) {
+                console.log("조도센서 데이터 수신:", data);
+                // 아날로그 값을 기반으로 조도 레벨 계산
+                let lightLevel = "알 수 없음";
+                if (data.analog !== null && data.analog !== undefined) {
+                    if (data.analog < 100) lightLevel = "매우 밝음";
+                    else if (data.analog < 300) lightLevel = "밝음";
+                    else if (data.analog < 600) lightLevel = "보통";
+                    else if (data.analog < 800) lightLevel = "어두움";
+                    else lightLevel = "매우 어두움";
+                }
+                log(`조도상태: ${lightLevel} (아날로그값: ${data.analog})`, 'response');
+            });
+            
+            // 초음파 센서 데이터 이벤트 리스너
+            ultrasonicSensor.onData(function(data) {
+                log(`초음파 센서: 거리=${data.distance}cm`, 'response');
+            });
+            
+            // 온습도 센서 데이터 이벤트 리스너
+            dhtSensor.onData(function(data) {
+                log(`온습도 센서: 온도=${data.temperature}°C, 습도=${data.humidity}%`, 'response');
+            });
+            
+            // 터치 센서 데이터 이벤트 리스너
+            touchSensor.onData(function(data) {
+                log(`터치 센서: ${data.touched ? '터치됨' : '터치 안됨'}`, 'response');
+            });
+            
+            // 서보 모터 데이터 이벤트 리스너
+            servoMotor.onData(function(data) {
+                log(`서보 모터: ${data.raw}`, 'response');
+            });
+            
+            // BLE 연결 이벤트 리스너들
+            bleConnection.onConnected(function(device) {
+                log(`장치에 연결됨: ${device.name}`, 'success');
+                updateConnectionStatus(true);
+            });
+            
+            bleConnection.onDisconnected(function(data) {
+                log(`장치 연결 해제: ${data.message}`, 'info');
+                updateConnectionStatus(false);
+            });
+            
+            bleConnection.onConnectionFailed(function(message) {
+                log(`연결 실패: ${message}`, 'error');
+                updateConnectionStatus(false);
+            });
+            
+            // 버튼 이벤트 리스너들
+            connectBtn.addEventListener('click', handleConnectButtonClick);
+            disconnectBtn.addEventListener('click', handleDisconnectButtonClick);
+            sendBtn.addEventListener('click', handleSendButtonClick);
+            
+            // Enter 키로 명령어 전송 이벤트 리스너
+            commandInput.addEventListener('keypress', function(event) {
+                if (event.key === 'Enter' && !sendBtn.disabled) {
+                    sendBtn.click();
+                }
+            });
+        }
+        
+        // 연결 버튼 클릭 핸들러
+        async function handleConnectButtonClick() {
+            log('블루투스 장치 연결 시도...', 'info');
+            try {
+                // Web Bluetooth API 지원 여부 확인
+                if (!navigator.bluetooth) {
+                    log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.', 'error');
+                    return;
+                }
+                
+                log('Web Bluetooth API 지원: ' + (!!navigator.bluetooth), 'info');
+                
+                // 블루투스 가용성 확인
+                try {
+                    const availableDevices = await navigator.bluetooth.getAvailability();
+                    log('블루투스 사용 가능: ' + availableDevices, 'info');
+                } catch (e) {
+                    log('블루투스 가용성 확인 오류: ' + e.message, 'info');
+                }
+                
+                // 연결 시도
+                await bleConnection.connect();
+            } catch (error) {
+                log(`연결 오류: ${error.message}`, 'error');
+                log(`상세 오류: ${error.stack || '상세 정보 없음'}`, 'error');
+            }
+        }
+        
+        // 연결 해제 버튼 클릭 핸들러
+        function handleDisconnectButtonClick() {
+            log('블루투스 장치 연결 해제 중...', 'info');
+            bleConnection.disconnect();
+        }
+        
+        // 명령어 전송 버튼 클릭 핸들러
+        async function handleSendButtonClick() {
+            const command = commandInput.value.trim();
+            if (!command) {
+                log('명령어를 입력하세요', 'error');
+                return;
+            }
+            
+            log(`명령어 전송: ${command}`, 'command');
+            try {
+                // 명령어 타입에 따라 해당 처리 함수 호출
+                if (command.startsWith("LED:")) {
+                    await handleLEDCommand(command);
+                } 
+                else if (command.startsWith("LIGHT:")) {
+                    await handleLightSensorCommand(command);
+                }
+                else if (command.startsWith("ULTRA:")) {
+                    await handleUltrasonicCommand(command);
+                }
+                else if (command.startsWith("DHT:")) {
+                    await handleDHTCommand(command);
+                }
+                else if (command.startsWith("TOUCH:")) {
+                    await handleTouchCommand(command);
+                }
+                else if (command.startsWith("SERVO:")) {
+                    await handleServoCommand(command);
+                } 
+                else {
+                    await handleOtherCommand(command);
+                }
+            } catch (error) {
+                log(`명령어 전송 실패: ${error.message}`, 'error');
+            }
+        }
+        
+        // LED 명령어 처리 함수
+        async function handleLEDCommand(command) {
+            if (command === "LED:ON") {
+                await led.turnOn();
+                log('LED 켜기 명령 전송 성공', 'success');
+            } else if (command === "LED:OFF") {
+                await led.turnOff();
+                log('LED 끄기 명령 전송 성공', 'success');
+            } else if (command.startsWith("LED:BLINK:")) {
+                const interval = parseInt(command.split(':')[2]) || 1000;
+                await led.blink(interval);
+                log(`LED 깜빡임 명령 전송 성공 (간격: ${interval}ms)`, 'success');
+            } else if (command.startsWith("LED:BRIGHTNESS:")) {
+                const brightness = parseInt(command.split(':')[2]) || 50;
+                await led.setBrightness(brightness);
+                log(`LED 밝기 설정 명령 전송 성공 (밝기: ${brightness}%)`, 'success');
+            } else if (command.startsWith("LED:PIN:")) {
+                const pin = parseInt(command.split(':')[2]) || 13;
+                await led.setPin(pin);
+                log(`LED 핀 설정 명령 전송 성공 (핀: ${pin})`, 'success');
+            } else {
+                // 기타 LED 명령어는 일반 sendCommand 사용
+                await led.sendCommand(command);
+                log('LED 명령 전송 성공', 'success');
+            }
+        }
+        
+        // 조도센서 명령어 처리 함수
+        async function handleLightSensorCommand(command) {
+            if (command === "LIGHT:STATUS") {
+                await lightSensor.getStatus();
+                log('조도센서 상태 요청 전송 성공', 'success');
+            } else if (command.startsWith("LIGHT:PIN:")) {
+                const pins = command.split(':')[2].split(',');
+                if (pins.length === 2) {
+                    await lightSensor.setPin(parseInt(pins[0]), parseInt(pins[1]));
+                    log(`조도센서 핀 설정 전송 성공 (아날로그: ${pins[0]}, 디지털: ${pins[1]})`, 'success');
+                } else {
+                    await lightSensor.setPin(parseInt(pins[0]));
+                    log(`조도센서 핀 설정 전송 성공 (아날로그: ${pins[0]})`, 'success');
+                }
+            } else {
+                // 기타 조도센서 명령어는 일반 sendCommand 사용
+                await lightSensor.sendCommand(command);
+                log('조도센서 명령 전송 성공', 'success');
+            }
+        }
+        
+        // 초음파 센서 명령어 처리 함수
+        async function handleUltrasonicCommand(command) {
+            await ultrasonicSensor.sendCommand(command);
+            log('초음파 센서 명령 전송 성공', 'success');
+        }
+        
+        // 온습도 센서 명령어 처리 함수
+        async function handleDHTCommand(command) {
+            await dhtSensor.sendCommand(command);
+            log('온습도 센서 명령 전송 성공', 'success');
+        }
+        
+        // 터치 센서 명령어 처리 함수
+        async function handleTouchCommand(command) {
+            await touchSensor.sendCommand(command);
+            log('터치 센서 명령 전송 성공', 'success');
+        }
+        
+        // 서보 모터 명령어 처리 함수
+        async function handleServoCommand(command) {
+            await servoMotor.sendCommand(command);
+            log('서보 모터 명령 전송 성공', 'success');
+        }
+        
+        // 기타 명령어 처리 함수
+        async function handleOtherCommand(command) {
+            // 명령어 유형에 따른 특성 UUID 결정
+            let characteristicUUID;
+            
+            if (command.startsWith('CAM:')) {
+                characteristicUUID = CAM_CHARACTERISTIC;
+            } else if (command.startsWith('NEO:') || command.startsWith('NEO_')) {
+                characteristicUUID = NEOPIXEL_CHARACTERISTIC;
+            } else if (command.startsWith('BUZ:') || command.startsWith('BUZZER:')) {
+                characteristicUUID = BUZZER_CHARACTERISTIC;
+            } else if (command.startsWith('REPL:')) {
+                characteristicUUID = REPL_CHARACTERISTIC;
+            } else if (command.startsWith('GYRO:')) {
+                characteristicUUID = GYRO_CHARACTERISTIC;
+            } else {
+                // 기본값으로 LED 특성 사용
+                characteristicUUID = LED_CHARACTERISTIC;
+                console.warn(`알 수 없는 명령 형식입니다: ${command}. LED 특성을 기본값으로 사용합니다.`);
+            }
+            
+            // BleLib으로 직접 전송
+            await window.BleLib.sendCommand(characteristicUUID, command);
+            log('명령어 전송 성공', 'success');
+        }
+    </script>
+</body>
+</html>

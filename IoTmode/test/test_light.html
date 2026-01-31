@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>밝기센서(LIGHT) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        #valueBox {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px solid #ccc;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 140px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>밝기센서(LIGHT) 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="readLightBtn" disabled>밝기값 읽기</button>
+
+    <div id="valueBox">
+        밝기값: <span id="lightValue">-</span>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn   = document.getElementById('connectBtn');
+        const readLightBtn = document.getElementById('readLightBtn');
+        const valueSpan    = document.getElementById('lightValue');
+        const logArea      = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager  = null;
+        let lightSensor = null;
+
+        // 예시 기본 핀: 2 (A0/D7). 실제 연결 핀 번호에 맞게 수정 가능.
+        const DEFAULT_LIGHT_PIN = 2;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof LightSensor === 'undefined' ||
+                typeof getValidLightSensorValue === 'undefined') {
+                log('BLE/Light 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            // 블록코드 스타일: 전역 객체 생성
+            // let lightSensor = new LightSensor();
+            bleManager  = BLEManager.getInstance();
+            bleManager.init();
+            lightSensor = new LightSensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            readLightBtn.addEventListener('click', handleReadLight);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled   = true;
+            readLightBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // 블록코드 패턴: lightSensor.setPin(pinNum).then(...).catch(...)
+                log(`밝기센서 핀을 GPIO ${DEFAULT_LIGHT_PIN}으로 설정합니다.`);
+                lightSensor.setPin(DEFAULT_LIGHT_PIN).then(() => {
+                    log('밝기센서 핀 설정 완료');
+                    readLightBtn.disabled = false;
+                }).catch(err => {
+                    log('밝기센서 핀 설정 실패: ' + err);
+                    connectBtn.disabled = false;
+                });
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleReadLight() {
+            try {
+                log('밝기값 측정 요청...');
+
+                // 블록코드 패턴: getValidLightSensorValue(lightSensor) 사용
+                const lightVal = await getValidLightSensorValue(lightSensor);
+
+                valueSpan.textContent = lightVal;
+                log(`측정 완료: 밝기값=${lightVal}`);
+            } catch (e) {
+                log('밝기값 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

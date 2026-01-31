@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EZMaker 전류센서(EZCURR) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        label {
+            display: inline-block;
+            width: 60px;
+        }
+        input[type="number"] {
+            width: 80px;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 180px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>EZMaker 전류센서(EZCURR, INA219) 테스트</h1>
+
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="setPinBtn" disabled>I2C 핀 설정 (공통 핀 적용)</button>
+    <button id="readCurrBtn" disabled>전류/전압 읽기</button>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn  = document.getElementById('connectBtn');
+        const setPinBtn   = document.getElementById('setPinBtn');
+        const readCurrBtn = document.getElementById('readCurrBtn');
+        const logArea     = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager  = null;
+        let ezCurrSensor = null;
+        let bleConnected = false;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' || typeof EzCurrSensor === 'undefined') {
+                log('BLE 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+            if (typeof EZ_I2C_SDA_PIN !== 'number' || typeof EZ_I2C_SCL_PIN !== 'number') {
+                log('I2C 공통 핀 상수(EZ_I2C_SDA_PIN/EZ_I2C_SCL_PIN)가 JS 라이브러리에 정의되어 있지 않습니다.');
+                return;
+            }
+
+            bleManager  = BLEManager.getInstance();
+            bleManager.init();
+            ezCurrSensor = new EzCurrSensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            setPinBtn.addEventListener('click', handleSetPin);
+            readCurrBtn.addEventListener('click', handleReadCurr);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled = true;
+            setPinBtn.disabled = true;
+            readCurrBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                bleConnected = true;
+                log('블루투스 연결 완료');
+
+                setPinBtn.disabled = false;
+            } catch (e) {
+                log('연결 실패: ' + e.message);
+                connectBtn.disabled = false;
+                bleConnected = false;
+            }
+        }
+
+        async function handleSetPin() {
+            if (!bleConnected) {
+                log('먼저 블루투스를 연결해 주세요.');
+                return;
+            }
+
+            readCurrBtn.disabled = true;
+            log(`EZCURR I2C 핀 설정: SDA=${EZ_I2C_SDA_PIN}, SCL=${EZ_I2C_SCL_PIN}`);
+
+            try {
+                await ezCurrSensor.setPin(EZ_I2C_SDA_PIN, EZ_I2C_SCL_PIN);
+                log('EZCURR 핀 설정 완료');
+                readCurrBtn.disabled = false;
+            } catch (e) {
+                log('EZCURR 핀 설정 실패: ' + e.message);
+            }
+        }
+
+        async function handleReadCurr() {
+            if (!ezCurrSensor) {
+                log('EZCURR 센서 객체가 없습니다.');
+                return;
+            }
+
+            try {
+                const data = await getValidEzCurrValue(ezCurrSensor);
+                const current = data.current_mA;
+                const voltage = data.voltage;
+                log(`Current: ${current.toFixed(2)} mA, Voltage: ${voltage.toFixed(2)} V`);
+            } catch (e) {
+                log('전류/전압 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

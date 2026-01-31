@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DC 모터 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 4px 4px 0;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 140px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>DC 모터 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <div>
+        <button id="stopBtn"  disabled>정지</button>
+        <button id="spd30Btn" disabled>속도 30%</button>
+        <button id="spd50Btn" disabled>속도 50%</button>
+        <button id="spd100Btn" disabled>속도 100%</button>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn  = document.getElementById('connectBtn');
+        const stopBtn     = document.getElementById('stopBtn');
+        const spd30Btn    = document.getElementById('spd30Btn');
+        const spd50Btn    = document.getElementById('spd50Btn');
+        const spd100Btn   = document.getElementById('spd100Btn');
+        const logArea     = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager = null;
+        let motor      = null;
+
+        // 예시 기본 핀: 39 (D4, DC 모터 권장). 실제 핀맵에 맞게 수정 가능.
+        const DEFAULT_MOTOR_PIN = 39;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof DCMotor === 'undefined') {
+                log('BLE/DCMotor 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            // 블록코드 스타일: 전역 객체 생성
+            // let motor = new DCMotor();
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+            motor = new DCMotor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            stopBtn.addEventListener('click', handleStop);
+            spd30Btn.addEventListener('click', () => handleSetSpeed(30));
+            spd50Btn.addEventListener('click', () => handleSetSpeed(50));
+            spd100Btn.addEventListener('click', () => handleSetSpeed(100));
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled = true;
+            disableSpeedButtons(true);
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // 블록코드 패턴: motor.setPin(pinNum).then(...).catch(...)
+                log(`DC 모터 핀을 GPIO ${DEFAULT_MOTOR_PIN}으로 설정합니다.`);
+                motor.setPin(DEFAULT_MOTOR_PIN).then(() => {
+                    log('DC 모터 핀 설정 완료');
+                    disableSpeedButtons(false);
+                }).catch(err => {
+                    log('DC 모터 핀 설정 실패: ' + err);
+                    connectBtn.disabled = false;
+                });
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        function disableSpeedButtons(disabled) {
+            stopBtn.disabled   = disabled;
+            spd30Btn.disabled  = disabled;
+            spd50Btn.disabled  = disabled;
+            spd100Btn.disabled = disabled;
+        }
+
+        async function handleStop() {
+            try {
+                await motor.stop();
+                log('DC 모터 정지');
+            } catch (e) {
+                log('DC 모터 정지 실패: ' + e.message);
+            }
+        }
+
+        async function handleSetSpeed(speed) {
+            try {
+                await motor.setSpeed(speed);
+                log(`DC 모터 속도 설정: ${speed}%`);
+            } catch (e) {
+                log(`DC 모터 속도 ${speed}% 설정 실패: ` + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

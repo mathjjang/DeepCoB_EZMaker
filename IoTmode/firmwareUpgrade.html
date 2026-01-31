@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32-S3 펌웨어 업그레이드</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(45deg, #2196F3, #21CBF3);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .step {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .step.active {
+            border-color: #2196F3;
+            background: #f3f9ff;
+        }
+        
+        .step.completed {
+            border-color: #4CAF50;
+            background: #f1f8e9;
+        }
+        
+        .step-number {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            background: #2196F3;
+            color: white;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            margin-right: 15px;
+            font-weight: bold;
+        }
+        
+        .step.completed .step-number {
+            background: #4CAF50;
+        }
+        
+        .step-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        
+        .btn {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+        
+        .btn:hover {
+            background: #1976D2;
+            transform: translateY(-2px);
+        }
+        
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-success {
+            background: #4CAF50;
+        }
+        
+        .btn-success:hover {
+            background: #45a049;
+        }
+        
+        .btn-danger {
+            background: #f44336;
+        }
+        
+        .btn-danger:hover {
+            background: #da190b;
+        }
+        
+        .file-upload {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .file-upload:hover {
+            border-color: #2196F3;
+            background: #f3f9ff;
+        }
+        
+        .file-upload.dragover {
+            border-color: #2196F3;
+            background: #e3f2fd;
+        }
+        
+        .progress-container {
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            height: 20px;
+            background: linear-gradient(45deg, #2196F3, #21CBF3);
+            width: 0%;
+            transition: width 0.3s ease;
+            position: relative;
+        }
+        
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .status-log {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            height: 150px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            margin-top: 15px;
+        }
+        
+        .status-message {
+            margin-bottom: 5px;
+            padding: 2px 0;
+        }
+        
+        .status-info {
+            color: #333;
+        }
+        
+        .status-success {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .status-error {
+            color: #f44336;
+            font-weight: bold;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
+        .file-info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        
+        .connection-status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        
+        .connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 펌웨어 업그레이드</h1>
+            <p>ESP32-S3 MicroPython 보드를 최신 펌웨어로 업데이트하세요 (BLE 방식)</p>
+        </div>
+        
+        <div class="content">
+            <!-- 단계 1: 연결 -->
+            <div class="step" id="step1">
+                <div class="step-title">
+                    <span class="step-number">1</span>
+                    보드 BLE 연결
+                </div>
+                <p>ESP32-S3 보드와 Bluetooth LE로 연결하세요.</p>
+                <div class="connection-status disconnected" id="connectionStatus">
+                    ❌ 연결되지 않음
+                </div>
+                <button class="btn" id="connectBtn" onclick="connectToBoard()">
+                    BLE 연결
+                </button>
+                <button class="btn btn-danger" id="disconnectBtn" onclick="disconnectFromBoard()" disabled>
+                    연결 해제
+                </button>
+                
+                <!-- 펌웨어 버전 표시 영역 -->
+                <div id="firmwareVersionDisplay" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; border-left: 4px solid #007bff; display: none;">
+                    <div style="font-weight: bold; color: #007bff; margin-bottom: 5px;">
+                        📋 현재 펌웨어 버전
+                    </div>
+                    <div id="firmwareVersionText" style="font-family: 'Courier New', monospace; color: #333;">
+                        확인 중...
+                    </div>
+                    <div id="firmwareVersionExtra" style="font-size: 0.9em; color: #666; margin-top: 5px;">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 단계 2: 펌웨어 파일 선택 -->
+            <div class="step" id="step2">
+                <div class="step-title">
+                    <span class="step-number">2</span>
+                    펌웨어 파일 선택
+                </div>
+                <p>업그레이드할 펌웨어 파일을 선택하세요. (.zip, .mpy, .py 파일 지원)</p>
+                
+                <div class="file-upload" id="fileUpload" onclick="document.getElementById('fileInput').click()">
+                    <div>
+                        📁 파일을 선택하거나 여기로 드래그하세요
+                        <br>
+                        <small>지원 형식: .zip, .mpy, .py</small>
+                    </div>
+                </div>
+                
+                <input type="file" id="fileInput" accept=".zip,.mpy,.py" onchange="handleFileSelect(event)">
+                
+                <div class="file-info hidden" id="fileInfo">
+                    <strong>선택된 파일:</strong>
+                    <div id="fileName"></div>
+                    <div id="fileSize"></div>
+                    <div id="fileCount"></div>
+                </div>
+            </div>
+            
+            <!-- 단계 3: 업로드 -->
+            <div class="step" id="step3">
+                <div class="step-title">
+                    <span class="step-number">3</span>
+                    펌웨어 업로드
+                </div>
+                <p>펌웨어를 보드에 업로드합니다.</p>
+                
+                
+                
+                <!-- 테스트용 분리된 버튼들 -->
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 2px dashed #ccc;">
+                    
+                    
+                    <!-- 🔬 신규 프로세스 - 단계별 세밀 제어 -->
+                    <div style="padding: 15px; border: 2px solid #FF9800; border-radius: 8px; background: #fff8f0;">
+                        <p><strong>🔬 상세 단계별 제어</strong> - 개발/디버깅용</p>
+                        
+                        <!-- 상태 확인 버튼 -->
+                        <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #ccc;">
+                            <button class="btn" id="statusCheckBtn" onclick="checkESP32Status()" style="background: #9C27B0; margin-right: 10px;">
+                                🔍 ESP32 상태 확인
+                            </button>
+                            <button class="btn" id="versionCheckBtn" onclick="checkFirmwareVersion()" style="background: #FF9800; margin-right: 10px;">
+                                📋 펌웨어 버전 확인
+                            </button>
+                            <small style="color: #666;">현재 진행 상황과 펌웨어 버전을 확인할 수 있습니다.</small>
+                        </div>
+                        
+                        <!-- ESP32 상태 표시 영역 -->
+                        <div id="esp32StatusArea" style="margin-bottom: 15px; padding: 10px; background: #f0f0f0; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.9em; display: none;">
+                            <strong>📊 ESP32 현재 상태:</strong>
+                            <div id="esp32StatusContent" style="margin-top: 5px; white-space: pre-wrap;"></div>
+                        </div>
+                        
+                        <div style="margin-top: 10px;">
+                            <button class="btn" id="tempUploadBtn" onclick="runStep1Upload()" disabled>
+                                📁 1단계: 업로드
+                            </button>
+                            <button class="btn" id="step2BackupBtn" onclick="runStep2Backup()">
+                                💾 2단계: 백업
+                            </button>
+                            <button class="btn" id="step3ApplyBtn" onclick="runStep3Apply()">
+                                🔄 3단계: 적용
+                            </button>
+                            <button class="btn" id="step4CleanupBtn" onclick="runStep4Cleanup()">
+                                🧹 4단계: 정리&재시작
+                            </button>
+                        </div>
+                        <small style="color: #666; margin-top: 5px; display: block;">
+                            🛠️ ESP32 상태와 무관하게 언제든 실행 가능합니다. 중단된 지점부터 재시작할 수 있습니다.
+                        </small>
+                    </div>
+                </div>
+                
+                <div class="progress-container">
+                    <div class="progress-bar" id="progressBar">
+                        <div class="progress-text" id="progressText">0%</div>
+                    </div>
+                </div>
+                
+                <div class="status-log" id="statusLog"></div>
+            </div>
+            
+            <!-- 단계 4: 완료 -->
+            <div class="step" id="step4">
+                <div class="step-title">
+                    <span class="step-number">4</span>
+                    업그레이드 완료
+                </div>
+                <p>펌웨어 업그레이드가 완료되었습니다.</p>
+                
+                <button class="btn btn-success" id="restartBtn" onclick="restartBoard()" disabled>
+                    보드 재시작
+                </button>
+                <button class="btn" onclick="rollbackFirmware()">
+                    기존 버전 롤백
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 필요한 라이브러리 로드 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="integratedBleLib_Camera.js"></script>
+    <script src="webFirmwareUploader.js"></script>
+    
+    <script>
+        // 전역 변수들
+        let bleManager = null;
+        let firmwareUploader = null;
+        let selectedFile = null;
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeUploader();
+            setupDragAndDrop();
+            
+            // BLE가 이미 연결되어 있다면 상태 확인
+            setTimeout(() => {
+                if (bleManager && bleManager.isConnected) {
+                    addStatusMessage('페이지 재로드 감지 - ESP32 상태 확인 중...', 'info');
+                    checkESP32Status();
+                }
+            }, 2000); // 2초 후 확인
+        });
+
+        function initializeUploader() {
+            // BLEManager 인스턴스 사용
+            bleManager = BLEManager.getInstance();
+            firmwareUploader = new WebFirmwareUploader();
+            
+            // BLE 매니저 설정
+            firmwareUploader.setBLEManager(bleManager);
+            
+            // 콜백 설정
+            firmwareUploader.setProgressCallback(updateProgress);
+            firmwareUploader.setStatusCallback(addStatusMessage);
+            firmwareUploader.setCompleteCallback(onUploadComplete);
+            firmwareUploader.setErrorCallback(onUploadError);
+            
+            // BLE 연결 이벤트
+            bleManager.onConnected(() => {
+                updateConnectionStatus(true);
+                updateStepStatus(1, 'completed');
+                updateStepStatus(2, 'active');
+                
+                // BLE 연결 완료 시 자동으로 ESP32 상태 확인
+                setTimeout(() => {
+                    checkESP32Status();
+                }, 1000); // 1초 후 상태 확인
+                
+                // BLE 연결 완료 시 자동으로 펌웨어 버전 확인
+                setTimeout(() => {
+                    checkFirmwareVersionAuto();
+                }, 2000); // 2초 후 펌웨어 버전 확인
+            });
+            
+            bleManager.onDisconnected(() => {
+                updateConnectionStatus(false);
+                updateStepStatus(1, 'active');
+                resetSteps();
+                // 연결 해제 시 펌웨어 버전 표시 숨기기
+                hideFirmwareVersion();
+            });
+        }
+
+        async function connectToBoard() {
+            try {
+                addStatusMessage('BLE 연결 시도 중...', 'info');
+                await bleManager.connect();
+                addStatusMessage('BLE 연결 성공!', 'success');
+            } catch (error) {
+                addStatusMessage('BLE 연결 실패: ' + error.message, 'error');
+            }
+        }
+
+        async function disconnectFromBoard() {
+            try {
+                await bleManager.disconnect();
+                addStatusMessage('BLE 연결 해제됨', 'info');
+            } catch (error) {
+                addStatusMessage('BLE 연결 해제 실패: ' + error.message, 'error');
+            }
+        }
+
+        function setupDragAndDrop() {
+            const fileUpload = document.getElementById('fileUpload');
+            
+            fileUpload.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                fileUpload.classList.add('dragover');
+            });
+            
+            fileUpload.addEventListener('dragleave', () => {
+                fileUpload.classList.remove('dragover');
+            });
+            
+            fileUpload.addEventListener('drop', (e) => {
+                e.preventDefault();
+                fileUpload.classList.remove('dragover');
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            });
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        }
+
+        async function handleFile(file) {
+            selectedFile = file;
+            
+            try {
+                addStatusMessage('파일 분석 중...', 'info');
+                
+                // 📋 파일명에서 버전 정보 추출 시도
+                const fileName = file.name;
+                const versionMatch = fileName.match(/firmware[_-](\d+\.\d+\.\d+)/i);
+                
+                if (versionMatch) {
+                    const newVersion = versionMatch[1];
+                    addStatusMessage(`🔍 새 펌웨어 버전 감지: ${newVersion}`, 'info');
+                    
+                    // 현재 펌웨어 버전과 비교
+                    const currentVersionElement = document.getElementById('firmwareVersionText');
+                    const currentVersion = currentVersionElement ? currentVersionElement.textContent.trim() : 'unknown';
+                    
+                    if (currentVersion && currentVersion !== 'unknown' && currentVersion !== '확인 중...') {
+                        if (currentVersion === newVersion) {
+                            addStatusMessage(`⚠️ 동일한 버전입니다: 현재 ${currentVersion} → 새 버전 ${newVersion}`, 'info');
+                        } else {
+                            addStatusMessage(`🚀 펌웨어 업그레이드: 현재 ${currentVersion} → 새 버전 ${newVersion}`, 'success');
+                        }
+                    } else {
+                        addStatusMessage(`📋 새 펌웨어 버전: ${newVersion} (현재 버전: ${currentVersion})`, 'info');
+                    }
+                } else {
+                    addStatusMessage(`📁 파일명에서 버전 정보를 찾을 수 없습니다: ${fileName}`, 'info');
+                }
+                
+                await firmwareUploader.loadFirmwarePackage(file);
+                
+                displayFileInfo(file);
+                updateStepStatus(2, 'completed');
+                updateStepStatus(3, 'active');
+                
+                // temp 저장 버튼 활성화
+                document.getElementById('tempUploadBtn').disabled = false;
+                addStatusMessage('파일 로드 완료. 1단계 temp 저장 버튼을 클릭하세요', 'success');
+                
+            } catch (error) {
+                addStatusMessage('파일 로드 실패: ' + error.message, 'error');
+            }
+        }
+
+        // 파일 크기를 적절한 단위로 포맷하는 헬퍼 함수
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            
+            if (bytes < 1024) {
+                return `${bytes} Bytes`;
+            } else if (bytes < 1024 * 1024) {
+                return `${(bytes / 1024).toFixed(1)} KB (${bytes.toLocaleString()} bytes)`;
+            } else {
+                return `${(bytes / (1024 * 1024)).toFixed(1)} MB (${bytes.toLocaleString()} bytes)`;
+            }
+        }
+
+        function displayFileInfo(file) {
+            const fileInfo = document.getElementById('fileInfo');
+            const fileName = document.getElementById('fileName');
+            const fileSize = document.getElementById('fileSize');
+            const fileCount = document.getElementById('fileCount');
+            
+            fileName.textContent = file.name;
+            fileSize.textContent = `크기: ${formatFileSize(file.size)}`;
+            fileCount.textContent = `파일 수: ${firmwareUploader.firmwareFiles.size}개`;
+            
+            fileInfo.classList.remove('hidden');
+        }
+
+        // startUpload() 및 cancelUpload() 함수 제거됨 - 해당 버튼들이 삭제되었음
+
+        async function restartBoard() {
+            try {
+                await firmwareUploader.restartBoard();
+                addStatusMessage('보드 재시작 완료', 'success');
+            } catch (error) {
+                addStatusMessage('재시작 실패: ' + error.message, 'error');
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusElement = document.getElementById('connectionStatus');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            if (connected) {
+                statusElement.textContent = '✅ BLE 연결됨';
+                statusElement.className = 'connection-status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                statusElement.textContent = '❌ BLE 연결되지 않음';
+                statusElement.className = 'connection-status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function updateProgress(percent) {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            
+            progressBar.style.width = percent + '%';
+            progressText.textContent = Math.round(percent) + '%';
+        }
+
+        function addStatusMessage(message, type = 'info') {
+            const statusLog = document.getElementById('statusLog');
+            const messageElement = document.createElement('div');
+            
+            const timestamp = new Date().toLocaleTimeString();
+            messageElement.className = `status-message status-${type}`;
+            messageElement.textContent = `[${timestamp}] ${message}`;
+            
+            statusLog.appendChild(messageElement);
+            statusLog.scrollTop = statusLog.scrollHeight;
+        }
+
+        function updateStepStatus(stepNumber, status) {
+            const step = document.getElementById(`step${stepNumber}`);
+            step.className = `step ${status}`;
+        }
+
+        function resetSteps() {
+            for (let i = 2; i <= 4; i++) {
+                updateStepStatus(i, '');
+            }
+            document.getElementById('restartBtn').disabled = true;
+            
+            // temp 저장 버튼 비활성화
+            document.getElementById('tempUploadBtn').disabled = true;
+            
+            // 단계별 버튼들은 항상 활성화 상태 유지 (상태와 무관하게 실행 가능)
+            // document.getElementById('step2BackupBtn').disabled = false; (이미 활성화됨)
+            // document.getElementById('step3ApplyBtn').disabled = false; (이미 활성화됨)  
+            // document.getElementById('step4CleanupBtn').disabled = false; (이미 활성화됨)
+        }
+
+        function onUploadComplete() {
+            updateStepStatus(3, 'completed');
+            updateStepStatus(4, 'active');
+            
+            document.getElementById('restartBtn').disabled = false;
+            
+            addStatusMessage('펌웨어 업그레이드 완료!', 'success');
+        }
+
+        function onUploadError(message) {
+            addStatusMessage('오류: ' + message, 'error');
+            // 삭제된 버튼들에 대한 참조 제거
+        }
+
+        async function rollbackFirmware() {
+            try {
+                await firmwareUploader.rollbackFirmware();
+                addStatusMessage('기존 버전 롤백 완료', 'success');
+            } catch (error) {
+                addStatusMessage('롤백 실패: ' + error.message, 'error');
+            }
+        }
+
+        // 🔬 단계별 테스트: 1단계 - temp 저장만 실행
+        async function runStep1Upload() {
+            try {
+                addStatusMessage('=== 1단계: temp 저장 시작 ===', 'info');
+                document.getElementById('tempUploadBtn').disabled = true;
+                
+                // temp 저장만 실행하는 함수 호출
+                await firmwareUploader.runStep1Upload();
+                
+                // temp 저장 완료 후 단계별 버튼들 활성화
+                document.getElementById('step2BackupBtn').disabled = false;
+                addStatusMessage('=== 1단계 완료! 2단계 백업부터 순서대로 진행하세요 ===', 'success');
+                addStatusMessage('💡 다음: "2단계 백업" 버튼을 클릭하세요', 'info');
+                
+            } catch (error) {
+                addStatusMessage('1단계 temp 저장 실패: ' + error.message, 'error');
+                document.getElementById('tempUploadBtn').disabled = false;
+            }
+        }
+
+        // commitUpload() 함수 제거됨 - 해당 버튼이 삭제되었음
+
+        // 🔬 상세 단계별 테스트 함수들
+        async function runStep2Backup() {
+            try {
+                addStatusMessage('=== 🔬 상세 방식: 2단계 백업 시작 ===', 'info');
+                document.getElementById('step2BackupBtn').disabled = true;
+                
+                // 2단계 백업 함수 호출
+                await firmwareUploader.runStep2Backup();
+                
+                // 백업 완료 후 다음 단계 활성화
+                document.getElementById('step3ApplyBtn').disabled = false;
+                ////addStatusMessage('=== 🔬 2단계 완료! 3단계 "적용" 버튼 활성화 ===', 'success');
+                
+            } catch (error) {
+                addStatusMessage('2단계 백업 실패: ' + error.message, 'error');
+                document.getElementById('step2BackupBtn').disabled = false;
+            }
+        }
+
+        async function runStep3Apply() {
+            try {
+                addStatusMessage('=== 🔬 상세 방식: 3단계 적용 시작 ===', 'info');
+                document.getElementById('step3ApplyBtn').disabled = true;
+                
+                // 3단계 적용 함수 호출
+                await firmwareUploader.runStep3Apply();
+                
+                // 적용 완료 후 다음 단계 활성화
+                document.getElementById('step4CleanupBtn').disabled = false;
+                addStatusMessage('=== 🔬 3단계 완료! 4단계 "정리&재시작" 버튼 활성화 ===', 'success');
+                
+            } catch (error) {
+                addStatusMessage('3단계 적용 실패: ' + error.message, 'error');
+                document.getElementById('step3ApplyBtn').disabled = false;
+            }
+        }
+
+        async function runStep4Cleanup() {
+            try {
+                addStatusMessage('=== 🔬 상세 방식: 4단계 정리&재시작 시작 ===', 'info');
+                document.getElementById('step4CleanupBtn').disabled = true;
+                
+                // 4단계 정리&재시작 함수 호출
+                await firmwareUploader.runStep4Cleanup();
+                
+                addStatusMessage('=== 🔬 상세 방식: 완료! 보드가 재시작됩니다 ===', 'success');
+                onUploadComplete(); // 완료 처리
+                
+            } catch (error) {
+                addStatusMessage('4단계 정리&재시작 실패: ' + error.message, 'error');
+                document.getElementById('step4CleanupBtn').disabled = false;
+            }
+        }
+        
+        // 🔍 ESP32 상태 확인
+        async function checkESP32Status() {
+            try {
+                addStatusMessage('🔍 ESP32 상태 확인 중...', 'info');
+                document.getElementById('statusCheckBtn').disabled = true;
+                
+                // 상태 확인 함수 호출
+                await firmwareUploader.checkUpgradeStatus();
+                
+                document.getElementById('statusCheckBtn').disabled = false;
+                
+            } catch (error) {
+                addStatusMessage('ESP32 상태 확인 실패: ' + error.message, 'error');
+                document.getElementById('statusCheckBtn').disabled = false;
+            }
+        }
+        
+        // 📋 ESP32 펌웨어 버전 확인
+        async function checkFirmwareVersion() {
+            try {
+                addStatusMessage('📋 ESP32 펌웨어 버전 확인 중...', 'info');
+                document.getElementById('versionCheckBtn').disabled = true;
+                
+                // 펌웨어 버전 확인 함수 호출
+                await firmwareUploader.checkFirmwareVersion();
+                
+                document.getElementById('versionCheckBtn').disabled = false;
+                
+            } catch (error) {
+                addStatusMessage('펊웨어 버전 확인 실패: ' + error.message, 'error');
+                document.getElementById('versionCheckBtn').disabled = false;
+            }
+        }
+        
+        // 📋 ESP32 펌웨어 버전 자동 확인 (BLE 연결 시)
+        async function checkFirmwareVersionAuto() {
+            try {
+                console.log('자동 펌웨어 버전 확인 시작');
+                showFirmwareVersionLoading();
+                
+                // 펌웨어 버전 확인 함수 호출
+                await firmwareUploader.checkFirmwareVersion();
+                
+            } catch (error) {
+                console.error('자동 펌웨어 버전 확인 실패:', error);
+                showFirmwareVersionError('버전 확인 실패');
+            }
+        }
+        
+        // 펌웨어 버전 표시 영역 표시 (로딩 상태)
+        function showFirmwareVersionLoading() {
+            const display = document.getElementById('firmwareVersionDisplay');
+            const text = document.getElementById('firmwareVersionText');
+            const extra = document.getElementById('firmwareVersionExtra');
+            
+            display.style.display = 'block';
+            text.textContent = '확인 중...';
+            extra.textContent = '';
+        }
+        
+        // 펌웨어 버전 표시 (성공)
+        function showFirmwareVersion(version, systemInfo = {}) {
+            const display = document.getElementById('firmwareVersionDisplay');
+            const text = document.getElementById('firmwareVersionText');
+            const extra = document.getElementById('firmwareVersionExtra');
+            
+            display.style.display = 'block';
+            text.textContent = version;
+            
+            // 추가 시스템 정보 표시
+            let extraInfo = [];
+            if (systemInfo.memory) {
+                extraInfo.push(`메모리: ${(systemInfo.memory / 1024).toFixed(1)}KB`);
+            }
+            if (systemInfo.filesystem) {
+                extraInfo.push(`저장공간: ${(systemInfo.filesystem.free / 1024).toFixed(1)}KB 사용가능`);
+            }
+            
+            if (extraInfo.length > 0) {
+                extra.textContent = extraInfo.join(' | ');
+            } else {
+                extra.textContent = '✅ config.py에서 버전 정보 읽기 성공';
+            }
+        }
+        
+        // 펌웨어 버전 표시 (오류)
+        function showFirmwareVersionError(errorMsg) {
+            const display = document.getElementById('firmwareVersionDisplay');
+            const text = document.getElementById('firmwareVersionText');
+            const extra = document.getElementById('firmwareVersionExtra');
+            
+            display.style.display = 'block';
+            display.style.borderLeftColor = '#dc3545'; // 빨간색으로 변경
+            text.textContent = 'unknown';
+            extra.textContent = `❌ ${errorMsg}`;
+        }
+        
+        // 펌웨어 버전 표시 숨기기
+        function hideFirmwareVersion() {
+            const display = document.getElementById('firmwareVersionDisplay');
+            display.style.display = 'none';
+            display.style.borderLeftColor = '#007bff'; // 기본 파란색으로 복원
+        }
+    </script>
+</body>
+</html> 

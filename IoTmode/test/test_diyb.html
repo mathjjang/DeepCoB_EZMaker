@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EZMaker DIY-B 전류/전도도 센서 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        #valueBox {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px solid #ccc;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 140px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>EZMaker DIY-B 전류/전도도 센서 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="readDiyBBtn" disabled>DIY-B 값 읽기</button>
+
+    <div id="valueBox">
+        Raw(0~1023): <span id="diyBRaw">-</span><br>
+        Voltage(0~5V): <span id="diyBVoltage">-</span> V
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 (테스트용) -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn   = document.getElementById('connectBtn');
+        const readDiyBBtn  = document.getElementById('readDiyBBtn');
+        const rawSpan      = document.getElementById('diyBRaw');
+        const voltSpan     = document.getElementById('diyBVoltage');
+        const logArea      = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager = null;
+        let diyBSensor = null;
+
+        // 기본 ADC 핀: A1 (GPIO 1) 기준. 필요 시 다른 A포트로 변경 가능.
+        const DIYB_DEFAULT_ADC_PIN = 1;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof DiyBSensor === 'undefined' ||
+                typeof getValidDiyBValue === 'undefined') {
+                log('BLE/DIY-B 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+            diyBSensor = new DiyBSensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            readDiyBBtn.addEventListener('click', handleReadDiyB);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled  = true;
+            readDiyBBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // DIY-B 센서 핀 설정 (A1 → GPIO 1 기준)
+                log(`DIY-B 센서 핀을 GPIO ${DIYB_DEFAULT_ADC_PIN}으로 설정합니다.`);
+                await diyBSensor.setPin(DIYB_DEFAULT_ADC_PIN);
+                log('DIY-B 핀 설정 완료');
+
+                readDiyBBtn.disabled = false;
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleReadDiyB() {
+            try {
+                log('DIY-B 값 측정 요청...');
+
+                const result = await getValidDiyBValue(diyBSensor);
+                const raw = result.raw;
+                const voltage = result.voltage;
+
+                rawSpan.textContent  = (raw != null) ? raw : '-';
+                voltSpan.textContent = (voltage != null) ? voltage.toFixed(3) : '-';
+
+                log(`측정 완료: raw=${raw}, voltage=${voltage}V`);
+            } catch (e) {
+                log('DIY-B 값 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

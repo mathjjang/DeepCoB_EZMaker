@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>네오픽셀(NeoPixel) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        input, select {
+            padding: 4px 6px;
+            margin: 2px 0;
+        }
+        .row {
+            margin-bottom: 8px;
+        }
+        #preview {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 1px solid #ccc;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 160px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>네오픽셀(NeoPixel) 테스트</h1>
+
+    <div class="row">
+        <button id="connectBtn">블루투스 연결</button>
+    </div>
+
+    <div class="row">
+        데이터 핀:
+        <input id="pinInput" type="number" value="21" style="width:60px;">  <!-- 기본 D0(GPIO 21) -->
+        LED 개수:
+        <input id="countInput" type="number" value="4" style="width:60px;">
+        <button id="initNeoBtn" disabled>네오픽셀 초기화</button>
+    </div>
+
+    <div class="row">
+        색상 선택:
+        <input id="colorInput" type="color" value="#ff0000">
+        <span id="preview"></span>
+    </div>
+
+    <div class="row">
+        인덱스:
+        <input id="indexInput" type="number" value="0" style="width:60px;">
+        <button id="setPixelBtn" disabled>해당 LED만 켜기</button>
+    </div>
+
+    <div class="row">
+        <button id="setAllBtn" disabled>모든 LED를 선택 색으로 켜기</button>
+    </div>
+
+    <div class="row">
+        밝기(0~255):
+        <input id="brightnessInput" type="number" value="255" style="width:70px;">
+        <button id="setBrightnessBtn" disabled>밝기 설정</button>
+    </div>
+
+    <div class="row">
+        무지개 속도(1~10):
+        <input id="rainbowSpeedInput" type="number" value="5" style="width:60px;">
+        <button id="rainbowOnBtn" disabled>무지개 켜기</button>
+        <button id="rainbowOffBtn" disabled>무지개/LED 끄기</button>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn        = document.getElementById('connectBtn');
+        const initNeoBtn        = document.getElementById('initNeoBtn');
+        const setPixelBtn       = document.getElementById('setPixelBtn');
+        const setAllBtn         = document.getElementById('setAllBtn');
+        const setBrightnessBtn  = document.getElementById('setBrightnessBtn');
+        const rainbowOnBtn      = document.getElementById('rainbowOnBtn');
+        const rainbowOffBtn     = document.getElementById('rainbowOffBtn');
+
+        const pinInput          = document.getElementById('pinInput');
+        const countInput        = document.getElementById('countInput');
+        const colorInput        = document.getElementById('colorInput');
+        const indexInput        = document.getElementById('indexInput');
+        const brightnessInput   = document.getElementById('brightnessInput');
+        const rainbowSpeedInput = document.getElementById('rainbowSpeedInput');
+
+        const logArea           = document.getElementById('log');
+        const previewBox        = document.getElementById('preview');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager = null;
+        let neoPixel   = null;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof NeoPixel === 'undefined') {
+                log('BLE/NeoPixel 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+            neoPixel = new NeoPixel();
+
+            // 미리보기 색상 박스
+            previewBox.style.backgroundColor = colorInput.value;
+            colorInput.addEventListener('input', () => {
+                previewBox.style.backgroundColor = colorInput.value;
+            });
+
+            connectBtn.addEventListener('click', handleConnect);
+            initNeoBtn.addEventListener('click', handleInitNeo);
+            setPixelBtn.addEventListener('click', handleSetPixel);
+            setAllBtn.addEventListener('click', handleSetAll);
+            setBrightnessBtn.addEventListener('click', handleSetBrightness);
+            rainbowOnBtn.addEventListener('click', handleRainbowOn);
+            rainbowOffBtn.addEventListener('click', handleRainbowOff);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled       = true;
+            initNeoBtn.disabled       = true;
+            setPixelBtn.disabled      = true;
+            setAllBtn.disabled        = true;
+            setBrightnessBtn.disabled = true;
+            rainbowOnBtn.disabled     = true;
+            rainbowOffBtn.disabled    = true;
+
+            log('블루투스 장치 선택 중...');
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // 연결 후 네오픽셀 초기화 버튼 활성화
+                initNeoBtn.disabled = false;
+            } catch (e) {
+                log('연결 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleInitNeo() {
+            const pin   = parseInt(pinInput.value, 10);
+            let count   = parseInt(countInput.value, 10);
+
+            if (isNaN(pin)) {
+                log('데이터 핀 번호를 올바르게 입력하세요.');
+                return;
+            }
+            if (isNaN(count) || count <= 0) {
+                log('LED 개수를 1 이상으로 입력하세요.');
+                return;
+            }
+
+            // 과도한 개수 방지 (펌웨어도 60개로 제한 중)
+            if (count > 60) {
+                count = 60;
+                countInput.value = 60;
+            }
+
+            try {
+                log(`네오픽셀 핀을 GPIO ${pin}, LED 개수를 ${count}개로 설정합니다.`);
+                await neoPixel.setPin(pin, count);
+                log('네오픽셀 핀/개수 설정 완료');
+
+                setPixelBtn.disabled      = false;
+                setAllBtn.disabled        = false;
+                setBrightnessBtn.disabled = false;
+                rainbowOnBtn.disabled     = false;
+                rainbowOffBtn.disabled    = false;
+            } catch (e) {
+                log('네오픽셀 초기화 실패: ' + e.message);
+            }
+        }
+
+        async function handleSetPixel() {
+            const index = parseInt(indexInput.value, 10);
+            const color = colorInput.value;
+
+            if (isNaN(index)) {
+                log('인덱스를 올바르게 입력하세요.');
+                return;
+            }
+
+            try {
+                await neoPixel.setPixelColor(index, color);
+                log(`인덱스 ${index} LED를 색상 ${color} 로 설정했습니다.`);
+            } catch (e) {
+                log('특정 LED 설정 실패: ' + e.message);
+            }
+        }
+
+        async function handleSetAll() {
+            const color = colorInput.value;
+
+            try {
+                await neoPixel.setAllPixels(color);
+                log(`모든 LED를 색상 ${color} 로 설정했습니다.`);
+            } catch (e) {
+                log('모든 LED 설정 실패: ' + e.message);
+            }
+        }
+
+        async function handleSetBrightness() {
+            let brightness = parseInt(brightnessInput.value, 10);
+
+            if (isNaN(brightness)) {
+                log('밝기 값을 올바르게 입력하세요.');
+                return;
+            }
+
+            if (brightness < 0) brightness = 0;
+            if (brightness > 255) brightness = 255;
+            brightnessInput.value = brightness;
+
+            try {
+                await neoPixel.setBrightness(brightness);
+                log(`밝기를 ${brightness}(0~255) 로 설정했습니다.`);
+            } catch (e) {
+                log('밝기 설정 실패: ' + e.message);
+            }
+        }
+
+        async function handleRainbowOn() {
+            let speed = parseInt(rainbowSpeedInput.value, 10);
+
+            if (isNaN(speed)) {
+                log('무지개 속도를 올바르게 입력하세요.');
+                return;
+            }
+
+            if (speed < 1) speed = 1;
+            if (speed > 10) speed = 10;
+            rainbowSpeedInput.value = speed;
+
+            try {
+                await neoPixel.setRainbow(speed);
+                log(`무지개 효과를 속도 ${speed} 로 설정했습니다.`);
+            } catch (e) {
+                log('무지개 효과 설정 실패: ' + e.message);
+            }
+        }
+
+        async function handleRainbowOff() {
+            try {
+                await neoPixel.turnOff();
+                log('NEO:OFF 명령 전송, 모든 LED 끄기.');
+            } catch (e) {
+                log('LED 끄기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+

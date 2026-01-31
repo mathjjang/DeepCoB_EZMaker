@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>I2C LCD 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        input, select {
+            padding: 4px 6px;
+            margin: 2px 0;
+        }
+        .row {
+            margin-bottom: 8px;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 180px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>I2C LCD 테스트</h1>
+
+    <div class="row">
+        <button id="connectBtn">블루투스 연결</button>
+    </div>
+
+    <div class="row">
+        LCD 타입:
+        <select id="lcdTypeSelect">
+            <option value="16X2" selected>16x2</option>
+            <option value="20X4">20x4</option>
+        </select>
+    </div>
+
+    <div class="row">
+        SCL 핀:
+        <input id="sclInput" type="number" value="40" style="width:70px;">
+        SDA 핀:
+        <input id="sdaInput" type="number" value="41" style="width:70px;">
+        <button id="initLcdBtn" disabled>LCD 초기화</button>
+    </div>
+
+    <div class="row">
+        <button id="clearBtn" disabled>화면 지우기</button>
+        <button id="backlightOnBtn" disabled>백라이트 ON</button>
+        <button id="backlightOffBtn" disabled>백라이트 OFF</button>
+    </div>
+
+    <div class="row">
+        행(row):
+        <input id="rowInput" type="number" value="0" style="width:60px;">
+        열(col):
+        <input id="colInput" type="number" value="0" style="width:60px;">
+    </div>
+
+    <div class="row">
+        텍스트:
+        <input id="textInput" type="text" value="EZMaker LCD Test" style="width:260px;">
+        <button id="printBtn" disabled>출력</button>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn       = document.getElementById('connectBtn');
+        const initLcdBtn       = document.getElementById('initLcdBtn');
+        const clearBtn         = document.getElementById('clearBtn');
+        const backlightOnBtn   = document.getElementById('backlightOnBtn');
+        const backlightOffBtn  = document.getElementById('backlightOffBtn');
+        const printBtn         = document.getElementById('printBtn');
+
+        const lcdTypeSelect    = document.getElementById('lcdTypeSelect');
+        const sclInput         = document.getElementById('sclInput');
+        const sdaInput         = document.getElementById('sdaInput');
+        const rowInput         = document.getElementById('rowInput');
+        const colInput         = document.getElementById('colInput');
+        const textInput        = document.getElementById('textInput');
+
+        const logArea          = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager = null;
+        let lcd        = null;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof LcdDisplay === 'undefined') {
+                log('BLE/LCD 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+            lcd = new LcdDisplay();
+
+            connectBtn.addEventListener('click', handleConnect);
+            initLcdBtn.addEventListener('click', handleInitLcd);
+            clearBtn.addEventListener('click', handleClear);
+            backlightOnBtn.addEventListener('click', () => handleBacklight(true));
+            backlightOffBtn.addEventListener('click', () => handleBacklight(false));
+            printBtn.addEventListener('click', handlePrint);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled     = true;
+            initLcdBtn.disabled     = true;
+            clearBtn.disabled       = true;
+            backlightOnBtn.disabled = true;
+            backlightOffBtn.disabled= true;
+            printBtn.disabled       = true;
+
+            log('블루투스 장치 선택 중...');
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+                initLcdBtn.disabled = false;
+            } catch (e) {
+                log('연결 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleInitLcd() {
+            const type = lcdTypeSelect.value || "16X2";
+            const scl  = parseInt(sclInput.value, 10);
+            const sda  = parseInt(sdaInput.value, 10);
+
+            if (isNaN(scl) || isNaN(sda)) {
+                log('SCL/SDA 핀 번호를 올바르게 입력하세요.');
+                return;
+            }
+
+            try {
+                log(`LCD 초기화: 타입=${type}, SCL=${scl}, SDA=${sda}`);
+                await lcd.init(type, scl, sda);
+                log('LCD 초기화 명령 전송 완료');
+
+                clearBtn.disabled       = false;
+                backlightOnBtn.disabled = false;
+                backlightOffBtn.disabled= false;
+                printBtn.disabled       = false;
+            } catch (e) {
+                log('LCD 초기화 실패: ' + e.message);
+            }
+        }
+
+        async function handleClear() {
+            try {
+                await lcd.clear();
+                log('LCD 화면 클리어');
+            } catch (e) {
+                log('LCD 클리어 실패: ' + e.message);
+            }
+        }
+
+        async function handleBacklight(on) {
+            try {
+                await lcd.setBacklight(on);
+                log('백라이트 ' + (on ? 'ON' : 'OFF'));
+            } catch (e) {
+                log('백라이트 제어 실패: ' + e.message);
+            }
+        }
+
+        async function handlePrint() {
+            let row  = parseInt(rowInput.value, 10);
+            let col  = parseInt(colInput.value, 10);
+            const txt = textInput.value || '';
+
+            if (isNaN(row)) row = 0;
+            if (isNaN(col)) col = 0;
+            rowInput.value = row;
+            colInput.value = col;
+
+            try {
+                await lcd.print(row, col, txt);
+                log(`(${row}, ${col}) 위치에 "${txt}" 출력`);
+            } catch (e) {
+                log('텍스트 출력 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+
