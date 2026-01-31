@@ -2,6 +2,84 @@
 
 'use strict';
 
+// -----------------------------------------
+// Logging (none / info / debug)
+// - none : 로그 없음
+// - info : 사용자에게 유의미한 요약 로그
+// - debug: 고빈도/정밀 로그(성능 저하 가능)
+//
+// 사용 예:
+//   window.EZ_LOG.setLevel('debug');
+//   window.EZ_LOG.setLevel('info');
+//   window.EZ_LOG.setLevel('none');
+// -----------------------------------------
+const EZ_LOG = (() => {
+    // Capture native console methods first (avoid recursion if we shadow console later)
+    const RAW = {
+        log: (typeof console !== 'undefined' && console.log) ? console.log.bind(console) : () => {},
+        warn: (typeof console !== 'undefined' && console.warn) ? console.warn.bind(console) : () => {},
+        error: (typeof console !== 'undefined' && console.error) ? console.error.bind(console) : () => {},
+    };
+
+    const LEVELS = { none: 0, info: 1, debug: 2 };
+    const normalize = (level) => {
+        if (!level) return 'info';
+        const v = String(level).toLowerCase();
+        return Object.prototype.hasOwnProperty.call(LEVELS, v) ? v : 'info';
+    };
+
+    let _level = 'info';
+    try {
+        if (typeof window !== 'undefined') {
+            _level = normalize(window.EZ_LOG_LEVEL);
+        }
+    } catch (e) { /* ignore */ }
+
+    const enabled = (minLevel) => LEVELS[_level] >= LEVELS[minLevel];
+
+    const api = {
+        getLevel() { return _level; },
+        setLevel(level) { _level = normalize(level); return _level; },
+        isInfo() { return enabled('info'); },
+        isDebug() { return enabled('debug'); },
+        info(...args) { if (enabled('info')) RAW.log(...args); },
+        debug(...args) { if (enabled('debug')) RAW.log(...args); },
+        warn(...args) { if (enabled('info')) RAW.warn(...args); },
+        error(...args) { if (enabled('info')) RAW.error(...args); },
+    };
+
+    try {
+        if (typeof window !== 'undefined') {
+            window.EZ_LOG = api;
+        }
+    } catch (e) { /* ignore */ }
+
+    return api;
+})();
+
+// Shadow console log/warn/error inside this file to respect EZ_LOG levels.
+// - console.log  -> EZ_LOG.debug(...)
+// - console.warn -> EZ_LOG.warn(...)
+// - console.error-> EZ_LOG.error(...)
+// Other console methods are delegated to the native console.
+try {
+    if (typeof window !== 'undefined' && window.console) {
+        const __NATIVE_CONSOLE__ = window.console;
+        // eslint-disable-next-line no-unused-vars
+        const console = new Proxy(__NATIVE_CONSOLE__, {
+            get(target, prop) {
+                if (prop === 'log') return (...args) => EZ_LOG.debug(...args);
+                if (prop === 'warn') return (...args) => EZ_LOG.warn(...args);
+                if (prop === 'error') return (...args) => EZ_LOG.error(...args);
+                const v = target[prop];
+                return typeof v === 'function' ? v.bind(target) : v;
+            }
+        });
+    }
+} catch (e) {
+    // ignore
+}
+
 // constants.js 내용을 직접 포함
 // -----------------------------------------
 // IoT 모드 UUID
@@ -878,17 +956,17 @@ class BLEManager extends BLECore {
      * @returns {Promise<void>} - 알림 시작 프로미스
      */
     async startNotifications(characteristicUUID, callback) {
-        console.log(`[BLEManager] ${characteristicUUID} 특성 알림 시작`);
+        EZ_LOG.info(`[BLEManager] ${characteristicUUID} 특성 알림 시작`);
 
         if (!this.isConnected || !this.server) {
-            console.error(`[BLEManager] 장치가 연결되어 있지 않아 알림을 시작할 수 없습니다.`);
+            EZ_LOG.error(`[BLEManager] 장치가 연결되어 있지 않아 알림을 시작할 수 없습니다.`);
             throw new Error('장치가 연결되어 있지 않습니다.');
         }
 
         try {
             // 특성 UUID에 맞는 서비스 UUID 결정
             const serviceUUID = this._getServiceUUIDForCharacteristic(characteristicUUID);
-            console.log(`[BLEManager] 서비스 선택: ${serviceUUID}`);
+            EZ_LOG.debug(`[BLEManager] 서비스 선택: ${serviceUUID}`);
             // 서비스 가져오기
             const service = await this.server.getPrimaryService(serviceUUID);
             // 특성 가져오기
@@ -897,7 +975,8 @@ class BLEManager extends BLECore {
             // 알림 수신 이벤트 리스너 먼저 등록
             const handleNotification = (event) => {
                 const value = event.target.value;
-                console.log(`[BLEManager] 특성 알림 수신: ${characteristicUUID}`);
+                // 카메라/센서 스트리밍 등 고빈도 이벤트는 debug로만 로깅
+                EZ_LOG.debug(`[BLEManager] 특성 알림 수신: ${characteristicUUID}`);
                 if (callback) {
                     callback(value);
                 }
@@ -909,10 +988,10 @@ class BLEManager extends BLECore {
                 char.startNotifications();
             }, 1000);
 
-            console.log(`[BLEManager] ${characteristicUUID} 특성 알림 시작 성공`);
+            EZ_LOG.info(`[BLEManager] ${characteristicUUID} 특성 알림 시작 성공`);
             return Promise.resolve();
         } catch (error) {
-            console.error(`[BLEManager] 특성 알림 시작 실패: ${error.message}`);
+            EZ_LOG.error(`[BLEManager] 특성 알림 시작 실패: ${error.message}`);
             throw error;
         }
     }
@@ -964,11 +1043,11 @@ class SensorBase {
      */
     _setupNotifications() {
         // Console 디버깅
-        console.log(`[DEBUG] ${this.name} 센서의 _setupNotifications 호출됨`);
-        console.log(`[DEBUG] ${this.name} 특성 UUID: ${this.characteristicUUID}`);
+        EZ_LOG.debug(`[DEBUG] ${this.name} 센서의 _setupNotifications 호출됨`);
+        EZ_LOG.debug(`[DEBUG] ${this.name} 특성 UUID: ${this.characteristicUUID}`);
 
         if (!this.bleManager) {
-            console.error(`[DEBUG] ${this.name}: BLEManager 인스턴스가 없습니다`);
+            EZ_LOG.error(`[DEBUG] ${this.name}: BLEManager 인스턴스가 없습니다`);
             return;
         }
 
@@ -983,18 +1062,18 @@ class SensorBase {
         ];
 
         if (notifyNotSupported.includes(this.characteristicUUID)) {
-            console.log(`[DEBUG] ${this.name}: 이 센서(${this.characteristicUUID})는 알림을 지원하지 않습니다. 알림 설정 건너뜁니다.`);
+            EZ_LOG.debug(`[DEBUG] ${this.name}: 이 센서(${this.characteristicUUID})는 알림을 지원하지 않습니다. 알림 설정 건너뜁니다.`);
             return;
         }
 
         // 연결 상태를 확인하고, 연결되지 않았으면 연결 후에 알림 설정
         if (!this.bleManager.isConnected) {
-            console.log(`[DEBUG] ${this.name}: 장치가 아직 연결되지 않았습니다. 연결 후 알림을 설정합니다.`);
+            EZ_LOG.debug(`[DEBUG] ${this.name}: 장치가 아직 연결되지 않았습니다. 연결 후 알림을 설정합니다.`);
 
             // 연결 완료 후 알림 설정을 위한 리스너 추가
             const self = this;
             this.bleManager.onConnected(function (device) {
-                console.log(`[DEBUG] ${self.name}: 장치 연결됨, 알림 설정 시도`);
+                EZ_LOG.debug(`[DEBUG] ${self.name}: 장치 연결됨, 알림 설정 시도`);
                 self._setupNotificationsAfterConnection();
             });
 
@@ -1011,26 +1090,27 @@ class SensorBase {
         // 명시적으로 특성 알림 구독
         const self = this;
         try {
-            console.log(`[DEBUG] ${this.name}: 특성 알림 시작 시도`);
+            EZ_LOG.debug(`[DEBUG] ${this.name}: 특성 알림 시작 시도`);
             this.bleManager.startNotifications(this.characteristicUUID, function (data) {
-                console.log(`[DEBUG] ${self.name} 알림 콜백 호출됨:`, data);
+                // 고빈도 데이터(카메라 청크 등)는 debug로만 출력
+                EZ_LOG.debug(`[DEBUG] ${self.name} 알림 콜백 호출됨`);
                 // 데이터 형식 일관성 유지
                 self._processData({ data: data, characteristicUUID: self.characteristicUUID });
             }).then(() => {
-                console.log(`[DEBUG] ${self.name}: 특성 알림 시작 성공`);
+                EZ_LOG.debug(`[DEBUG] ${self.name}: 특성 알림 시작 성공`);
             }).catch(error => {
-                console.warn(`[DEBUG] ${self.name}: 특성 알림 시작 실패:`, error);
+                EZ_LOG.warn(`[DEBUG] ${self.name}: 특성 알림 시작 실패`);
             });
 
             // 기존 onDataReceived도 유지
             this.bleManager.onDataReceived(function (data) {
                 if (data.characteristicUUID === self.characteristicUUID) {
-                    console.log(`[DEBUG] ${self.name} onDataReceived 콜백 호출됨:`, data);
+                    EZ_LOG.debug(`[DEBUG] ${self.name} onDataReceived 콜백 호출됨`);
                     self._processData(data); // 데이터 형식 일관성 유지
                 }
             });
         } catch (error) {
-            console.error(`[DEBUG] ${this.name}: 알림 설정 중 오류:`, error);
+            EZ_LOG.error(`[DEBUG] ${this.name}: 알림 설정 중 오류`);
         }
     }
 
@@ -2180,7 +2260,7 @@ class Camera extends SensorBase {
         this.onStreamingStateChange = null;
 
         // 로깅
-        console.log("[Camera] 카메라 모듈 초기화됨");
+        EZ_LOG.info("[Camera] 카메라 모듈 초기화됨");
     }
 
     /**
@@ -2188,7 +2268,7 @@ class Camera extends SensorBase {
      * @returns {Promise<boolean>} - 명령 전송 성공 여부
      */
     async takeSnapshot() {
-        console.log("[Camera] 사진 촬영 요청");
+        EZ_LOG.info("[Camera] 사진 촬영 요청");
         return await this.sendCommand("CAM:SNAP");
     }
 
@@ -2197,7 +2277,7 @@ class Camera extends SensorBase {
      * @returns {Promise<boolean>} - 명령 전송 성공 여부
      */
     async startStreaming() {
-        console.log("[Camera] 스트리밍 시작 요청");
+        EZ_LOG.info("[Camera] 스트리밍 시작 요청");
 
         try {
             // 먼저 스트리밍 간격 설정
@@ -2216,7 +2296,7 @@ class Camera extends SensorBase {
 
             return result;
         } catch (error) {
-            console.error(`[Camera] 스트리밍 시작 실패: ${error.message}`);
+            EZ_LOG.error(`[Camera] 스트리밍 시작 실패: ${error.message}`);
             throw error;
         }
     }
@@ -2226,7 +2306,7 @@ class Camera extends SensorBase {
      * @returns {Promise<boolean>} - 명령 전송 성공 여부
      */
     async stopStreaming() {
-        console.log("[Camera] 스트리밍 중지 요청");
+        EZ_LOG.info("[Camera] 스트리밍 중지 요청");
 
         try {
             const result = await this.sendCommand("CAM:STREAM:OFF");
@@ -2241,7 +2321,7 @@ class Camera extends SensorBase {
 
             return result;
         } catch (error) {
-            console.error(`[Camera] 스트리밍 중지 실패: ${error.message}`);
+            EZ_LOG.error(`[Camera] 스트리밍 중지 실패: ${error.message}`);
             throw error;
         }
     }
@@ -2257,7 +2337,7 @@ class Camera extends SensorBase {
         if (intervalMs > 1000) intervalMs = 1000;
 
         this.streamInterval = intervalMs;
-        console.log(`[Camera] 스트리밍 간격 설정: ${intervalMs}ms`);
+        EZ_LOG.info(`[Camera] 스트리밍 간격 설정: ${intervalMs}ms`);
 
         return await this.sendCommand(`CAM:INTERVAL ${intervalMs}`);
     }
@@ -2354,7 +2434,7 @@ class Camera extends SensorBase {
                 dataStr = String(data);
             }
         } catch (e) {
-            console.error(`[Camera] 데이터 변환 오류: ${e.message}`);
+            EZ_LOG.error(`[Camera] 데이터 변환 오류: ${e.message}`);
             dataStr = String(data || "");
         }
 
@@ -2379,7 +2459,7 @@ class Camera extends SensorBase {
                 dataView = new DataView(rawData.buffer, rawData.byteOffset, rawData.byteLength);
             } else {
                 // 처리할 수 없는 데이터 형식
-                console.error(`[Camera] 처리할 수 없는 데이터 형식: ${typeof rawData}`);
+                EZ_LOG.error(`[Camera] 처리할 수 없는 데이터 형식: ${typeof rawData}`);
                 return;
             }
 
@@ -2396,7 +2476,7 @@ class Camera extends SensorBase {
                 this._processTextCommand(fullText);
             }
         } catch (e) {
-            console.error(`[Camera] 이진 데이터 처리 오류: ${e.message}`);
+            EZ_LOG.error(`[Camera] 이진 데이터 처리 오류: ${e.message}`);
         }
     }
 
@@ -2409,39 +2489,39 @@ class Camera extends SensorBase {
 
         // 일부 로깅 (너무 길면 잘라서 표시)
         const logText = text.length > 30 ? text.substring(0, 30) + "..." : text;
-        console.log(`[Camera] 수신 텍스트: ${logText}`);
+        EZ_LOG.debug(`[Camera] 수신 텍스트: ${logText}`);
 
         if (text.startsWith("CAM:START")) {
             // 새 프레임 시작
-            console.log("[Camera] 새 프레임 수신 시작");
+            EZ_LOG.debug("[Camera] 새 프레임 수신 시작");
             this.receivingFrame = true;
             this.frameChunks = [];
             this.currentFrameSize = 0;
             this.expectedChunks = 0;
             /////////////////////////////////////////////////////////////////////////////////////////
-            //보드의 send_frame 에서 chunk size 반드시 같도록 해야 함.
-            this.chunkSize = 200;   //160
+            // 보드 펌웨어와 동일한 청크 크기(현재 펌웨어: 160 bytes)
+            this.chunkSize = 160;
         }
         else if (text.startsWith("SIZE:") && this.receivingFrame) {
             // 프레임 크기 정보
             try {
                 this.currentFrameSize = parseInt(text.substring(5));
-                console.log(`[Camera] 프레임 크기: ${this.currentFrameSize} 바이트`);
+                EZ_LOG.info(`[Camera] 프레임 크기: ${this.currentFrameSize} 바이트`);
 
                 // 예상 청크 수 계산 (160바이트 청크 기준)
                 this.expectedChunks = Math.ceil(this.currentFrameSize / this.chunkSize);
             } catch (e) {
-                console.error(`[Camera] 프레임 크기 파싱 오류: ${e.message}`);
+                EZ_LOG.error(`[Camera] 프레임 크기 파싱 오류: ${e.message}`);
                 this.receivingFrame = false;
             }
         }
         else if (text === "CAM:END" && this.receivingFrame) {
             // 프레임 수신 완료
-            console.log(`[Camera] 프레임 수신 완료: ${this.frameChunks.length} 청크`);
+            EZ_LOG.info(`[Camera] 프레임 수신 완료: ${this.frameChunks.length} 청크`);
             this._assembleImageFromChunks();
         }
         else if (text === "CAM:ERROR") {
-            console.error("[Camera] 카메라 오류 발생");
+            EZ_LOG.error("[Camera] 카메라 오류 발생");
             this.receivingFrame = false;
             this.frameChunks = [];
         }
@@ -2454,7 +2534,7 @@ class Camera extends SensorBase {
      */
     _processBinaryChunk(dataView, headerStr) {
         if (!this.receivingFrame) {
-            console.warn("[Camera] 프레임 수신 중이 아닌데 청크 데이터가 도착했습니다.");
+            EZ_LOG.debug("[Camera] 프레임 수신 중이 아닌데 청크 데이터가 도착했습니다.");
             return;
         }
 
@@ -2462,7 +2542,7 @@ class Camera extends SensorBase {
             // 헤더와 데이터 분리 지점 찾기
             const colonIndex = headerStr.indexOf(':');
             if (colonIndex <= 0) {
-                console.error("[Camera] 유효하지 않은 바이너리 헤더 형식");
+                EZ_LOG.error("[Camera] 유효하지 않은 바이너리 헤더 형식");
                 return;
             }
 
@@ -2470,7 +2550,7 @@ class Camera extends SensorBase {
             const seqNumStr = headerStr.substring(3, colonIndex);
             const seqNum = parseInt(seqNumStr);
             if (isNaN(seqNum)) {
-                console.error(`[Camera] 유효하지 않은 시퀀스 번호: ${seqNumStr}`);
+                EZ_LOG.error(`[Camera] 유효하지 않은 시퀀스 번호: ${seqNumStr}`);
                 return;
             }
 
@@ -2490,9 +2570,10 @@ class Camera extends SensorBase {
                 data: imageData
             });
 
-            console.log(`[Camera] 청크 ${seqNum} 수신 (${this.frameChunks.length}/${this.expectedChunks})`);
+            // 고빈도 로그는 debug에서만 (info에서는 프레임 단위 요약만)
+            EZ_LOG.debug(`[Camera] 청크 ${seqNum} 수신 (${this.frameChunks.length}/${this.expectedChunks})`);
         } catch (e) {
-            console.error(`[Camera] 바이너리 청크 처리 오류: ${e.message}`);
+            EZ_LOG.error(`[Camera] 바이너리 청크 처리 오류: ${e.message}`);
         }
     }
 
@@ -2503,7 +2584,7 @@ class Camera extends SensorBase {
         this.receivingFrame = false;
 
         if (this.frameChunks.length === 0) {
-            console.error("[Camera] 수신된 이미지 청크가 없습니다.");
+            EZ_LOG.error("[Camera] 수신된 이미지 청크가 없습니다.");
             return;
         }
 
@@ -2524,9 +2605,9 @@ class Camera extends SensorBase {
                 this.onImageComplete(blob);
             }
 
-            console.log(`[Camera] 이미지 조립 완료: ${blob.size} 바이트`);
+            EZ_LOG.info(`[Camera] 이미지 조립 완료: ${blob.size} 바이트`);
         } catch (e) {
-            console.error(`[Camera] 이미지 조립 오류: ${e.message}`);
+            EZ_LOG.error(`[Camera] 이미지 조립 오류: ${e.message}`);
         } finally {
             // 메모리 해제
             this.frameChunks = [];
