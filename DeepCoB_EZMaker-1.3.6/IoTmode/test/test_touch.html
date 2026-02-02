@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>터치 센서(TTP223) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 4px 4px 0;
+        }
+        #values {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px solid #ccc;
+        }
+        #values span {
+            font-weight: bold;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 150px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>터치 센서(TTP223) 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="readTouchBtn" disabled>터치 상태 읽기</button>
+
+    <div id="values">
+        현재 터치 상태: <span id="touchState">-</span>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn   = document.getElementById('connectBtn');
+        const readTouchBtn = document.getElementById('readTouchBtn');
+        const touchStateEl = document.getElementById('touchState');
+        const logArea      = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager  = null;
+        let touchSensor = null;
+
+        // 터치 센서 기본 핀 (필요 시 이 값을 사용 환경에 맞게 수정)
+        const DEFAULT_TOUCH_PIN = 21;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof TouchSensor === 'undefined') {
+                log('BLE/Touch 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            // 블록코드 스타일: 전역 객체 생성
+            bleManager  = BLEManager.getInstance();
+            bleManager.init();
+            touchSensor = new TouchSensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            readTouchBtn.addEventListener('click', handleReadTouch);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled   = true;
+            readTouchBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // 블록코드 패턴: touchSensor.setPin(pin).then(...).catch(...)
+                log(`터치 센서 핀을 ${DEFAULT_TOUCH_PIN}번으로 설정합니다.`);
+                touchSensor.setPin(DEFAULT_TOUCH_PIN).then(() => {
+                    log('터치 센서 핀 설정 완료');
+                    readTouchBtn.disabled = false;
+                }).catch(err => {
+                    log('터치 센서 핀 설정 실패: ' + err);
+                    connectBtn.disabled = false;
+                });
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleReadTouch() {
+            try {
+                log('터치 센서 상태 요청...');
+
+                // 상태 요청
+                await touchSensor.getStatus();
+
+                // 알림 처리 후 상태가 갱신될 시간을 약간 준 뒤 읽기
+                setTimeout(() => {
+                    const touched = touchSensor.isTouched();
+                    touchStateEl.textContent = touched ? '터치됨' : '터치 안됨';
+                    log(`측정 완료: ${touched ? '터치됨' : '터치 안됨'}`);
+                }, 100);
+            } catch (e) {
+                log('터치 센서 값 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

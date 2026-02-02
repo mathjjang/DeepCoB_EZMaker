@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EZ 밝기센서(EZLIGHT) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        #valueBox {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px solid #ccc;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 140px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>EZ 밝기센서(EZLIGHT) 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="readEzLightBtn" disabled>EZ 밝기값 읽기</button>
+
+    <div style="margin-top:8px; margin-bottom:8px;">
+        사용 ADC 포트:
+        <select id="pinSelect">
+            <option value="A0">A0 (기본)</option>
+            <option value="A1">A1</option>
+            <option value="A2">A2</option>
+            <option value="A3">A3</option>
+            <option value="A4">A4</option>
+        </select>
+    </div>
+
+    <div id="valueBox">
+        Raw(0~1023): <span id="ezLightRaw">-</span><br>
+        Percent(0~100%): <span id="ezLightPercent">-</span>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn      = document.getElementById('connectBtn');
+        const readEzLightBtn  = document.getElementById('readEzLightBtn');
+        const pinSelect       = document.getElementById('pinSelect');
+        const rawSpan         = document.getElementById('ezLightRaw');
+        const percentSpan     = document.getElementById('ezLightPercent');
+        const logArea         = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager    = null;
+        let ezLightSensor = null;
+        let bleConnected  = false;
+
+        // EZMaker 보드의 ADC 포트(A0~A4) → GPIO 매핑
+        // 보드 핀맵에 맞게 필요시 수정해서 사용하세요.
+        const EZLIGHT_PIN_MAP = {
+            A0: 2,  // 예: A0 → GPIO 2
+            A1: 1,  // 예: A1 → GPIO 1
+            A2: 3,  // 예: A2 → GPIO 0 (필요시 수정)
+            A3: 20,  // 예: A3 → GPIO 3
+            A4: 19   // 예: A4 → GPIO 4 (필요시 수정)
+        };
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof EzLightSensor === 'undefined' ||
+                typeof getValidEzLightValue === 'undefined') {
+                log('BLE/EZLIGHT 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            bleManager    = BLEManager.getInstance();
+            bleManager.init();
+            ezLightSensor = new EzLightSensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            readEzLightBtn.addEventListener('click', handleReadEzLight);
+
+            // 포트(A0~A4) 선택 시, 이미 블루투스가 연결되어 있으면 즉시 setPin 재실행
+            pinSelect.addEventListener('change', () => {
+                if (!bleConnected) {
+                    log('먼저 블루투스를 연결한 후 포트를 선택하세요.');
+                    return;
+                }
+                applySelectedPin();
+            });
+        });
+
+        function applySelectedPin() {
+            // 현재 선택된 A0~A4를 GPIO 번호로 변환하고 setPin 실행
+            const selectedPort = pinSelect.value;
+            const gpioPin = EZLIGHT_PIN_MAP[selectedPort];
+
+            if (typeof gpioPin !== 'number') {
+                log(`포트 매핑 오류: ${selectedPort} → GPIO 매핑을 확인해주세요.`);
+                return;
+            }
+
+            readEzLightBtn.disabled = true;
+            log(`EZLIGHT 센서 핀을 ${selectedPort} (GPIO ${gpioPin}) 으로 설정합니다.`);
+
+            ezLightSensor.setPin(gpioPin).then(() => {
+                log('EZLIGHT 센서 핀 설정 완료');
+                readEzLightBtn.disabled = false;
+            }).catch(err => {
+                log('EZLIGHT 센서 핀 설정 실패: ' + err);
+            });
+        }
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled     = true;
+            readEzLightBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                bleConnected = true;
+                log('블루투스 연결 완료');
+
+                // 현재 선택된 포트(A0~A4)에 대해 즉시 setPin 수행
+                applySelectedPin();
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+                bleConnected = false;
+            }
+        }
+
+        async function handleReadEzLight() {
+            try {
+                log('EZLIGHT 값 측정 요청...');
+
+                const status = await getValidEzLightValue(ezLightSensor);
+                const raw = status.raw;
+                const percent = status.percent;
+
+                rawSpan.textContent = (raw !== null && raw !== undefined) ? raw : '-';
+                percentSpan.textContent = (percent !== null && percent !== undefined)
+                    ? percent.toFixed(1)
+                    : '-';
+
+                log(`측정 완료: Raw=${raw}, Percent=${percent !== null && percent !== undefined ? percent.toFixed(1) : 'N/A'}%`);
+            } catch (e) {
+                log('EZLIGHT 값 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

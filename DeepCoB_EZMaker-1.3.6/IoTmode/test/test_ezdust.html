@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>EZMaker 미세먼지 센서(EZDUST) 테스트</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 16px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            font-size: 20px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        button {
+            padding: 8px 16px;
+            margin-right: 8px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            background-color: #1976d2;
+            color: #fff;
+            font-size: 14px;
+        }
+        button:disabled {
+            background-color: #aaa;
+            cursor: default;
+        }
+        select {
+            padding: 6px 8px;
+            font-size: 14px;
+        }
+        #log {
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 8px;
+            height: 220px;
+            overflow-y: auto;
+            border-radius: 4px;
+        }
+        .field {
+            margin-bottom: 8px;
+        }
+        .field label {
+            display: inline-block;
+            min-width: 120px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>EZMaker 미세먼지 센서(EZDUST, PMS7003M) 테스트</h1>
+        <p>블루투스를 연결한 뒤, UART 핀을 설정하고 측정 버튼을 눌러 PM10 / PM2.5 / PM1.0 값을 확인합니다.</p>
+        <div>
+            <button id="connectBtn">블루투스 연결</button>
+            <button id="disconnectBtn" disabled>연결 해제</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>UART 핀 설정</h2>
+        <p>무게센서와 동일하게, EZDUST 센서의 UART 핀은 JS 라이브러리에서 미리 정의된 <strong>공통 UART 핀(42, 14)</strong>을 사용합니다.</p>
+        <button id="setPinBtn" disabled>미세먼지 센서 setPin 실행</button>
+    </div>
+
+    <div class="card">
+        <h2>미세먼지 측정</h2>
+        <p>한 번의 측정으로 <strong>PM10 / PM2.5 / PM1.0</strong> 값을 동시에 가져옵니다.</p>
+        <div class="field">
+            <button id="readBtn" disabled>측정하기</button>
+        </div>
+        <div class="field">
+            <label>PM10:</label>
+            <span id="pm10Val">-</span>
+        </div>
+        <div class="field">
+            <label>PM2.5:</label>
+            <span id="pm2_5Val">-</span>
+        </div>
+        <div class="field">
+            <label>PM1.0:</label>
+            <span id="pm1_0Val">-</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>로그</h2>
+        <div id="log"></div>
+    </div>
+
+    <script src="./integratedBleLib_Camera.js"></script>
+    <script>
+        const logEl = document.getElementById('log');
+        function log(msg) {
+            const now = new Date();
+            const ts = now.toLocaleTimeString();
+            logEl.textContent += `[${ts}] ${msg}\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        let bleManager = null;
+        let ezDustSensor = null;
+        let bleConnected = false;
+
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const setPinBtn = document.getElementById('setPinBtn');
+        const readBtn = document.getElementById('readBtn');
+        const pm10Val = document.getElementById('pm10Val');
+        const pm2_5Val = document.getElementById('pm2_5Val');
+        const pm1_0Val = document.getElementById('pm1_0Val');
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' || typeof EzDustSensor === 'undefined') {
+                log('BLE 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+
+            connectBtn.addEventListener('click', handleConnect);
+            disconnectBtn.addEventListener('click', handleDisconnect);
+            setPinBtn.addEventListener('click', handleSetPin);
+            readBtn.addEventListener('click', handleRead);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled = true;
+            readBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                bleConnected = true;
+                log('블루투스 연결 완료');
+
+                // 연결 후에만 setPin 버튼 활성화
+                setPinBtn.disabled = false;
+                disconnectBtn.disabled = false;
+            } catch (e) {
+                console.error(e);
+                log('블루투스 연결 실패: ' + e.message);
+                connectBtn.disabled = false;
+                bleConnected = false;
+            }
+        }
+
+        async function handleDisconnect() {
+            try {
+                if (bleManager) {
+                    await bleManager.disconnect();
+                    log('블루투스 연결 해제 완료');
+                }
+            } catch (e) {
+                console.error(e);
+                log('연결 해제 중 오류: ' + e.message);
+            } finally {
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                setPinBtn.disabled = true;
+                readBtn.disabled = true;
+                bleConnected = false;
+                ezDustSensor = null;
+            }
+        }
+
+        async function handleSetPin() {
+            if (!bleConnected) {
+                log('먼저 블루투스를 연결하세요.');
+                return;
+            }
+
+            // 최초 setPin 시점에 인스턴스 생성
+            if (!ezDustSensor) {
+                ezDustSensor = new EzDustSensor();
+            }
+
+            // 통합 라이브러리에 정의된 UART 공통 핀 상수를 직접 사용 (단일 소스)
+            const txPin = (typeof EZ_UART_TX_PIN === 'number') ? EZ_UART_TX_PIN : NaN;
+            const rxPin = (typeof EZ_UART_RX_PIN === 'number') ? EZ_UART_RX_PIN : NaN;
+
+            if (isNaN(rxPin) || isNaN(txPin)) {
+                log('UART 공통 핀 값(EZ_UART_TX_PIN/EZ_UART_RX_PIN)이 올바르지 않습니다. JS 라이브러리 설정을 확인하세요.');
+                return;
+            }
+
+            readBtn.disabled = true;
+            log(`EZDUST 센서를 RX=${rxPin}, TX=${txPin} (공통 UART 핀) 으로 설정합니다.`);
+            try {
+                await ezDustSensor.setPin(rxPin, txPin);
+                log('EZDUST 센서 핀 설정 완료');
+                readBtn.disabled = false;
+            } catch (e) {
+                console.error(e);
+                log('핀 설정 실패: ' + e.message);
+            }
+        }
+
+        async function handleRead() {
+            if (!ezDustSensor) {
+                log('먼저 setPin 을 실행해 센서 인스턴스를 준비하세요.');
+                return;
+            }
+            try {
+                log('EZDUST 센서 상태 요청 전송');
+                const data = await getValidEzDustValue(ezDustSensor);
+                if (!data) {
+                    log('측정 실패: EZDUST 센서 데이터를 가져올 수 없습니다.');
+                    return;
+                }
+
+                const { pm10, pm2_5, pm1_0 } = data;
+                pm10Val.textContent = `${pm10} μg/m³`;
+                pm2_5Val.textContent = `${pm2_5} μg/m³`;
+                pm1_0Val.textContent = `${pm1_0} μg/m³`;
+                log(`측정 완료 - PM10=${pm10} μg/m³, PM2.5=${pm2_5} μg/m³, PM1.0=${pm1_0} μg/m³`);
+            } catch (e) {
+                console.error(e);
+                log('측정 실패: ' + e.message);
+            }
+        }
+
+    </script>
+</body>
+</html>
+
+

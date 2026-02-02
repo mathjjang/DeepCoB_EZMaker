@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EZMaker 수중/접촉 온도센서(EZTHERMAL) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>EZMaker 수중/접촉 온도센서(EZTHERMAL) 테스트</h1>
+
+    <button id="connectBtn">블루투스 연결</button>
+    <div style="margin-top:8px; margin-bottom:8px;">
+        사용 디지털 포트:
+        <select id="pinSelect">
+            <option value="D0">D0 (GPIO 21)</option>
+            <option value="D1">D1 (GPIO 47)</option>
+            <option value="D2">D2 (GPIO 48)</option>
+            <option value="D3">D3 (GPIO 38)</option>
+            <option value="D4">D4 (GPIO 39)</option>
+        </select>
+    </div>
+    <button id="readTempBtn" disabled>온도 읽기</button>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn  = document.getElementById('connectBtn');
+        const pinSelect   = document.getElementById('pinSelect');
+        const readTempBtn = document.getElementById('readTempBtn');
+        const logArea     = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager     = null;
+        let ezThermalSensor = null;
+        let bleConnected   = false;
+
+        // EZMaker 보드의 디지털 포트(D0~D4) → GPIO 매핑 (레이저/인체감지와 동일)
+        const EZTHERMAL_PIN_MAP = {
+            D0: 21,
+            D1: 47,
+            D2: 48,
+            D3: 38,
+            D4: 39
+        };
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' || typeof EzThermalSensor === 'undefined') {
+                log('BLE 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            bleManager      = BLEManager.getInstance();
+            bleManager.init();
+            ezThermalSensor = new EzThermalSensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            readTempBtn.addEventListener('click', handleReadTemp);
+
+            // 포트 변경 시에도 setPin 다시 적용
+            pinSelect.addEventListener('change', () => {
+                if (!bleConnected) {
+                    log('먼저 블루투스를 연결한 후 포트를 선택하세요.');
+                    return;
+                }
+                applySelectedPin();
+            });
+        });
+
+        async function applySelectedPin() {
+            const selectedPort = pinSelect.value;
+            const gpioPin = EZTHERMAL_PIN_MAP[selectedPort];
+
+            if (typeof gpioPin !== 'number') {
+                log(`포트 매핑 오류: ${selectedPort} → GPIO 매핑을 확인해주세요.`);
+                return;
+            }
+
+            readTempBtn.disabled = true;
+            log(`EZTHERMAL 센서를 ${selectedPort} (GPIO ${gpioPin}) 으로 설정합니다.`);
+            try {
+                await ezThermalSensor.setPin(gpioPin);
+                log('EZTHERMAL 센서 핀 설정 완료');
+                readTempBtn.disabled = false;
+            } catch (e) {
+                log('EZTHERMAL 센서 핀 설정 실패: ' + e.message);
+            }
+        }
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled  = true;
+            readTempBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                bleConnected = true;
+                log('블루투스 연결 완료');
+
+                // 현재 선택된 포트로 EZTHERMAL 핀 설정
+                await applySelectedPin();
+            } catch (e) {
+                log('연결 실패: ' + e.message);
+                connectBtn.disabled = false;
+                bleConnected = false;
+            }
+        }
+
+        async function handleReadTemp() {
+            if (!ezThermalSensor) {
+                log('EZTHERMAL 센서 객체가 없습니다.');
+                return;
+            }
+
+            try {
+                const data = await getValidEzThermalValue(ezThermalSensor);
+                const temp = data.temperature;
+                log(`Temperature: ${temp.toFixed(2)} °C`);
+            } catch (e) {
+                log('온도 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

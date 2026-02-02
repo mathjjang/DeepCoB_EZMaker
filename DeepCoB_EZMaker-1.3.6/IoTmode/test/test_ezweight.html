@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EZMaker 무게센서(EZWEIGHT, HX711) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        select, input {
+            padding: 4px;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 180px;
+            overflow-y: auto;
+        }
+        .field {
+            margin: 6px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>EZMaker 무게센서(EZWEIGHT, HX711) 테스트</h1>
+
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="setPinBtn" disabled>무게센서 setPin 실행</button>
+    <button id="readWeightBtn" disabled>무게 읽기</button>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn    = document.getElementById('connectBtn');
+        const setPinBtn     = document.getElementById('setPinBtn');
+        const readWeightBtn = document.getElementById('readWeightBtn');
+        const logArea       = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager     = null;
+        let ezWeightSensor = null;
+        let bleConnected   = false;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' || typeof EzWeightSensor === 'undefined') {
+                log('BLE 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+
+            connectBtn.addEventListener('click', handleConnect);
+            setPinBtn.addEventListener('click', handleSetPin);
+            readWeightBtn.addEventListener('click', handleReadWeight);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled    = true;
+            readWeightBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                bleConnected = true;
+                log('블루투스 연결 완료');
+
+                // 연결 후에만 setPin 버튼 활성화
+                setPinBtn.disabled = false;
+            } catch (e) {
+                log('연결 실패: ' + e.message);
+                connectBtn.disabled = false;
+                bleConnected = false;
+            }
+        }
+
+        async function handleSetPin() {
+            if (!bleConnected) {
+                log('먼저 블루투스를 연결하세요.');
+                return;
+            }
+
+            // 최초 setPin 시점에 인스턴스 생성
+            if (!ezWeightSensor) {
+                ezWeightSensor = new EzWeightSensor();
+            }
+
+            // 통합 라이브러리에 정의된 UART 공통 핀 상수를 직접 사용 (단일 소스)
+            const txPin = (typeof EZ_UART_TX_PIN === 'number') ? EZ_UART_TX_PIN : NaN;
+            const rxPin = (typeof EZ_UART_RX_PIN === 'number') ? EZ_UART_RX_PIN : NaN;
+
+            if (isNaN(txPin) || isNaN(rxPin)) {
+                log('UART 공통 핀 값(EZ_UART_TX_PIN/EZ_UART_RX_PIN)이 올바르지 않습니다. JS 라이브러리 설정을 확인하세요.');
+                return;
+            }
+
+            readWeightBtn.disabled = true;
+            log(`EZWEIGHT 센서를 TX=${txPin}, RX=${rxPin} (공통 UART 핀) 으로 설정합니다.`);
+            try {
+                // HX711 드라이버는 기존 DOUT/SCK 순서를 사용하므로 매핑만 명확히 전달
+                await ezWeightSensor.setPin(txPin, rxPin);
+                log('EZWEIGHT 센서 핀 설정 완료');
+                readWeightBtn.disabled = false;
+            } catch (e) {
+                log('EZWEIGHT 센서 핀 설정 실패: ' + e.message);
+            }
+        }
+
+        async function handleReadWeight() {
+            if (!ezWeightSensor) {
+                log('EZWEIGHT 센서 객체가 없습니다.');
+                return;
+            }
+
+            try {
+                const data = await getValidEzWeightValue(ezWeightSensor);
+                const raw = data.raw;
+                const weight = data.weight;
+                log(`Raw: ${raw}, Weight: ${weight != null ? weight.toFixed(2) : 'NaN'} g`);
+            } catch (e) {
+                log('무게 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

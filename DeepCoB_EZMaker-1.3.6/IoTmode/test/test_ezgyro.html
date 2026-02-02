@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EZMaker 자이로센서(ICM20948) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 4px 4px 0;
+        }
+        #values {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px solid #ccc;
+        }
+        #values table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        #values th, #values td {
+            border: 1px solid #ddd;
+            padding: 4px 6px;
+            text-align: center;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 150px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>EZMaker 자이로센서(ICM20948) 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="readGyroBtn" disabled>자이로값 읽기</button>
+
+    <div id="values">
+        <table>
+            <tr>
+                <th colspan="3">가속도 (g)</th>
+                <th colspan="3">자이로 (dps)</th>
+                <th colspan="2">각도 (°)</th>
+                <th>온도 (℃)</th>
+            </tr>
+            <tr>
+                <th>AX</th><th>AY</th><th>AZ</th>
+                <th>GX</th><th>GY</th><th>GZ</th>
+                <th>Roll</th><th>Pitch</th>
+                <th>Temp</th>
+            </tr>
+            <tr>
+                <td id="axVal">-</td>
+                <td id="ayVal">-</td>
+                <td id="azVal">-</td>
+                <td id="gxVal">-</td>
+                <td id="gyVal">-</td>
+                <td id="gzVal">-</td>
+                <td id="rollVal">-</td>
+                <td id="pitchVal">-</td>
+                <td id="tempVal">-</td>
+            </tr>
+        </table>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn   = document.getElementById('connectBtn');
+        const readGyroBtn  = document.getElementById('readGyroBtn');
+        const axVal        = document.getElementById('axVal');
+        const ayVal        = document.getElementById('ayVal');
+        const azVal        = document.getElementById('azVal');
+        const gxVal        = document.getElementById('gxVal');
+        const gyVal        = document.getElementById('gyVal');
+        const gzVal        = document.getElementById('gzVal');
+        const rollVal      = document.getElementById('rollVal');
+        const pitchVal     = document.getElementById('pitchVal');
+        const tempVal      = document.getElementById('tempVal');
+        const logArea      = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager   = null;
+        let ezGyroSensor = null;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof EzGyroSensor === 'undefined' ||
+                typeof getValidEzGyroValue === 'undefined') {
+                log('BLE/EZGyro 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+            if (typeof EZ_I2C_SDA_PIN !== 'number' || typeof EZ_I2C_SCL_PIN !== 'number') {
+                log('I2C 공통 핀 상수(EZ_I2C_SDA_PIN/EZ_I2C_SCL_PIN)가 JS 라이브러리에 정의되어 있지 않습니다.');
+                return;
+            }
+
+            // 블록코드 스타일: 전역 객체 생성
+            // let ezGyroSensor = new EzGyroSensor();
+            bleManager   = BLEManager.getInstance();
+            bleManager.init();
+            ezGyroSensor = new EzGyroSensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            readGyroBtn.addEventListener('click', handleReadGyro);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled  = true;
+            readGyroBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // I2C 공통 핀 사용
+                log(`EZ자이로센서 핀을 SDA=${EZ_I2C_SDA_PIN}, SCL=${EZ_I2C_SCL_PIN}으로 설정합니다.`);
+                ezGyroSensor.setPin(EZ_I2C_SDA_PIN, EZ_I2C_SCL_PIN).then(() => {
+                    log('EZ자이로센서 핀 설정 완료');
+                    readGyroBtn.disabled = false;
+                }).catch(err => {
+                    log('EZ자이로센서 핀 설정 실패: ' + err);
+                    connectBtn.disabled = false;
+                });
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleReadGyro() {
+            try {
+                log('EZ자이로센서 측정 요청...');
+
+                const data = await getValidEzGyroValue(ezGyroSensor);
+
+                axVal.textContent    = (data.ax != null)    ? data.ax.toFixed(2)    : '-';
+                ayVal.textContent    = (data.ay != null)    ? data.ay.toFixed(2)    : '-';
+                azVal.textContent    = (data.az != null)    ? data.az.toFixed(2)    : '-';
+                gxVal.textContent    = (data.gx != null)    ? data.gx.toFixed(2)    : '-';
+                gyVal.textContent    = (data.gy != null)    ? data.gy.toFixed(2)    : '-';
+                gzVal.textContent    = (data.gz != null)    ? data.gz.toFixed(2)    : '-';
+                rollVal.textContent  = (data.roll != null)  ? data.roll.toFixed(2)  : '-';
+                pitchVal.textContent = (data.pitch != null) ? data.pitch.toFixed(2) : '-';
+                tempVal.textContent  = (data.temp != null)  ? data.temp.toFixed(2)  : '-';
+
+                log(
+                    `측정 완료: AX=${data.ax}, AY=${data.ay}, AZ=${data.az}, `
+                    + `GX=${data.gx}, GY=${data.gy}, GZ=${data.gz}, `
+                    + `ROLL=${data.roll}, PITCH=${data.pitch}, TEMP=${data.temp}`
+                );
+            } catch (e) {
+                log('EZ자이로센서 값 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+

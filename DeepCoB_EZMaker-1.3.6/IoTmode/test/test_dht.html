@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>온습도 센서(DHT) 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        #values {
+            margin-top: 8px;
+            padding: 8px;
+            border: 1px solid #ccc;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 140px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>온습도 센서(DHT) 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <button id="readDhtBtn" disabled>온습도 읽기</button>
+
+    <div id="values">
+        <div>온도: <span id="tempValue">-</span> ℃</div>
+        <div>습도: <span id="humidValue">-</span> %</div>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn  = document.getElementById('connectBtn');
+        const readDhtBtn  = document.getElementById('readDhtBtn');
+        const tempSpan    = document.getElementById('tempValue');
+        const humidSpan   = document.getElementById('humidValue');
+        const logArea     = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager = null;
+        let dhtSensor  = null;
+
+        // 예시 기본 핀: 21 (D0). 필요한 경우 실제 연결 핀 번호로 수정해서 사용.
+        const DEFAULT_DHT_PIN = 21;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof DHTSensor === 'undefined' ||
+                typeof getValidDHTValue === 'undefined') {
+                log('BLE/DHT 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            // 블록코드 스타일: 전역 객체 생성
+            // let dhtSensor = new DHTSensor();
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+            dhtSensor = new DHTSensor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            readDhtBtn.addEventListener('click', handleReadDht);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled = true;
+            readDhtBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // 블록코드 패턴: dhtSensor.setPin(pinNum).then(...).catch(...)
+                log(`DHT 센서 핀을 GPIO ${DEFAULT_DHT_PIN}으로 설정합니다.`);
+                dhtSensor.setPin(DEFAULT_DHT_PIN).then(() => {
+                    log('DHT 센서 핀 설정 완료');
+                    readDhtBtn.disabled = false;
+                }).catch(err => {
+                    log('DHT 센서 핀 설정 실패: ' + err);
+                    connectBtn.disabled = false;
+                });
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleReadDht() {
+            try {
+                log('온습도 측정 요청...');
+
+                // 블록코드 패턴: getValidDHTValue(dhtSensor) 사용
+                let dhtData = await getValidDHTValue(dhtSensor);
+                let temperature = dhtData.temperature;
+                let humidity    = dhtData.humidity;
+
+                if (temperature != null) {
+                    tempSpan.textContent = temperature.toFixed(1);
+                } else {
+                    tempSpan.textContent = '-';
+                }
+
+                if (humidity != null) {
+                    humidSpan.textContent = humidity.toFixed(1);
+                } else {
+                    humidSpan.textContent = '-';
+                }
+
+                log(`측정 완료: 온도=${temperature} ℃, 습도=${humidity} %`);
+            } catch (e) {
+                log('온습도 읽기 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+
