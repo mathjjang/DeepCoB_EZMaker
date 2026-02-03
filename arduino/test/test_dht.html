@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DHT 테스트 (Arduino)</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 20px; margin-bottom: 12px; }
+    button { padding: 8px 12px; margin: 4px 0; }
+    input { padding: 6px 8px; margin: 2px 0; width: 90px; }
+    #values { margin-top: 8px; padding: 8px; border: 1px solid #ccc; }
+    #log { margin-top: 12px; padding: 8px; border: 1px solid #ccc; font-family: monospace; font-size: 12px; white-space: pre-wrap; height: 160px; overflow-y: auto; }
+    .row { margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <h1>온습도 센서(DHT) 테스트</h1>
+
+  <button id="connectBtn">블루투스 연결</button>
+
+  <div class="row">
+    DHT 핀(GPIO):
+    <input id="pinInput" type="number" value="21">
+    <button id="setPinBtn" disabled>핀 설정</button>
+  </div>
+
+  <button id="readBtn" disabled>온습도 읽기</button>
+
+  <div id="values">
+    <div>온도: <span id="tempValue">-</span> ℃</div>
+    <div>습도: <span id="humidValue">-</span> %</div>
+  </div>
+
+  <div id="log"></div>
+
+  <script src="./integratedBleLib_Camera.js"></script>
+  <script>
+    const connectBtn = document.getElementById('connectBtn');
+    const setPinBtn  = document.getElementById('setPinBtn');
+    const readBtn    = document.getElementById('readBtn');
+    const pinInput   = document.getElementById('pinInput');
+    const tempSpan   = document.getElementById('tempValue');
+    const humidSpan  = document.getElementById('humidValue');
+    const logArea    = document.getElementById('log');
+
+    function log(msg) {
+      const time = new Date().toLocaleTimeString();
+      logArea.textContent += `[${time}] ${msg}\n`;
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    let bleManager = null;
+    let dhtSensor  = null;
+
+    window.addEventListener('load', () => {
+      if (typeof BLEManager === 'undefined' ||
+          typeof DHTSensor === 'undefined' ||
+          typeof getValidDHTValue === 'undefined') {
+        log('BLE/DHT 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+        return;
+      }
+
+      bleManager = BLEManager.getInstance();
+      dhtSensor = new DHTSensor();
+
+      connectBtn.addEventListener('click', handleConnect);
+      setPinBtn.addEventListener('click', handleSetPin);
+      readBtn.addEventListener('click', handleRead);
+    });
+
+    async function handleConnect() {
+      if (!navigator.bluetooth) {
+        log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+        return;
+      }
+      connectBtn.disabled = true;
+      setPinBtn.disabled = true;
+      readBtn.disabled = true;
+      log('블루투스 장치 선택 중...');
+      try {
+        await bleManager.connect();
+        log('블루투스 연결 완료');
+        setPinBtn.disabled = false;
+      } catch (e) {
+        log('연결 실패: ' + e.message);
+        connectBtn.disabled = false;
+      }
+    }
+
+    async function handleSetPin() {
+      const pin = parseInt(pinInput.value, 10);
+      if (isNaN(pin) || pin < 0) {
+        log('핀 번호를 올바르게 입력하세요.');
+        return;
+      }
+      setPinBtn.disabled = true;
+      readBtn.disabled = true;
+      try {
+        log(`DHT:PIN:${pin} 전송`);
+        await dhtSensor.setPin(pin);
+        log('DHT 핀 설정 완료');
+        readBtn.disabled = false;
+      } catch (e) {
+        log('DHT 핀 설정 실패: ' + e.message);
+      } finally {
+        setPinBtn.disabled = false;
+      }
+    }
+
+    async function handleRead() {
+      try {
+        log('DHT:STATUS 요청...');
+        const dhtData = await getValidDHTValue(dhtSensor);
+        const t = dhtData.temperature;
+        const h = dhtData.humidity;
+        tempSpan.textContent = (t != null) ? t.toFixed(1) : '-';
+        humidSpan.textContent = (h != null) ? h.toFixed(1) : '-';
+        log(`측정 완료: T=${t}℃, H=${h}%`);
+      } catch (e) {
+        log('온습도 읽기 실패: ' + e.message);
+      }
+    }
+  </script>
+</body>
+</html>
+

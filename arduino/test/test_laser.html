@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EZMaker 레이저 테스트 (Arduino)</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 20px; margin-bottom: 12px; }
+    button { padding: 8px 12px; margin: 4px 4px 4px 0; }
+    select, input { padding: 6px 8px; margin: 2px 0; }
+    #log { margin-top: 12px; padding: 8px; border: 1px solid #ccc; font-family: monospace; font-size: 12px; white-space: pre-wrap; height: 160px; overflow-y: auto; }
+    .row { margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <h1>EZMaker 레이저 테스트</h1>
+
+  <button id="connectBtn">블루투스 연결</button>
+
+  <div class="row">
+    사용 디지털 포트:
+    <select id="pinSelect">
+      <option value="D0">D0 (GPIO 21)</option>
+      <option value="D1">D1 (GPIO 47)</option>
+      <option value="D2">D2 (GPIO 48)</option>
+      <option value="D3">D3 (GPIO 38)</option>
+      <option value="D4">D4 (GPIO 39)</option>
+    </select>
+    <button id="setPinBtn" disabled>핀 설정</button>
+  </div>
+
+  <div class="row">
+    <button id="onBtn" disabled>레이저 켜기</button>
+    <button id="offBtn" disabled>레이저 끄기</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script src="./integratedBleLib_Camera.js"></script>
+  <script>
+    const connectBtn = document.getElementById('connectBtn');
+    const pinSelect  = document.getElementById('pinSelect');
+    const setPinBtn  = document.getElementById('setPinBtn');
+    const onBtn      = document.getElementById('onBtn');
+    const offBtn     = document.getElementById('offBtn');
+    const logArea    = document.getElementById('log');
+
+    function log(msg) {
+      const time = new Date().toLocaleTimeString();
+      logArea.textContent += `[${time}] ${msg}\n`;
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    const PIN_MAP = { D0: 21, D1: 47, D2: 48, D3: 38, D4: 39 };
+
+    let bleManager = null;
+    let laser = null;
+    let connected = false;
+
+    window.addEventListener('load', () => {
+      if (typeof BLEManager === 'undefined' || typeof Laser === 'undefined') {
+        log('BLE/Laser 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+        return;
+      }
+      bleManager = BLEManager.getInstance();
+      laser = new Laser();
+
+      connectBtn.addEventListener('click', handleConnect);
+      setPinBtn.addEventListener('click', applyPin);
+      onBtn.addEventListener('click', async () => {
+        try { await laser.turnOn(); log('LASER:ON 전송'); } catch (e) { log('ON 실패: ' + e.message); }
+      });
+      offBtn.addEventListener('click', async () => {
+        try { await laser.turnOff(); log('LASER:OFF 전송'); } catch (e) { log('OFF 실패: ' + e.message); }
+      });
+    });
+
+    async function handleConnect() {
+      if (!navigator.bluetooth) {
+        log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+        return;
+      }
+      connectBtn.disabled = true;
+      setPinBtn.disabled = true;
+      onBtn.disabled = true;
+      offBtn.disabled = true;
+      log('블루투스 장치 선택 중...');
+      try {
+        await bleManager.connect();
+        connected = true;
+        log('블루투스 연결 완료');
+        setPinBtn.disabled = false;
+      } catch (e) {
+        log('연결 실패: ' + e.message);
+        connectBtn.disabled = false;
+      }
+    }
+
+    async function applyPin() {
+      if (!connected) return;
+      const port = pinSelect.value;
+      const gpio = PIN_MAP[port];
+      if (typeof gpio !== 'number') {
+        log('포트 매핑 오류: ' + port);
+        return;
+      }
+      setPinBtn.disabled = true;
+      onBtn.disabled = true;
+      offBtn.disabled = true;
+      try {
+        log(`LASER:PIN:${gpio} 전송 (${port})`);
+        await laser.setPin(gpio);
+        log('레이저 핀 설정 완료');
+        onBtn.disabled = false;
+        offBtn.disabled = false;
+      } catch (e) {
+        log('레이저 핀 설정 실패: ' + e.message);
+      } finally {
+        setPinBtn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
+

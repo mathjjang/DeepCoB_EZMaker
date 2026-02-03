@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepCoB 버저 테스트 (BUZ)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+        .hint {
+            font-size: 12px;
+            color: #444;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0 12px;
+            line-height: 1.35;
+        }
+        button {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        input, select {
+            padding: 4px;
+        }
+        .row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin: 8px 0;
+        }
+        .row label {
+            font-size: 12px;
+            color: #333;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 220px;
+            overflow-y: auto;
+        }
+        .pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            background: #eee;
+        }
+        .pill.ok { background: #e6ffed; border: 1px solid #b7ebc6; }
+        .pill.bad { background: #ffecec; border: 1px solid #f5b7b7; }
+        .small {
+            font-size: 12px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <h1>버저 테스트 (BUZ)</h1>
+    <div class="hint">
+        <div><b>목표</b>: <code>BUZ:BEEP</code>/<code>BUZ:PLAY</code>가 안 되는 문제를 재현/진단합니다.</div>
+        <div style="margin-top:6px;">
+            <b>중요</b>:
+            <ul style="margin:6px 0 0 18px;">
+                <li><code>BUZ:INIT</code> 후에만 동작합니다.</li>
+                <li>이 페이지는 BLE <b>write 성공/실패</b>만 확인합니다. 펌웨어가 버저 notify를 거의 보내지 않아서, 성공 여부는 <b>소리(청감)</b>로 판단해야 합니다.</li>
+                <li><code>BUZ:BEEP:ON</code>은 스레드 없이 PWM만 켜서 잘 되는데, <code>BUZ:BEEP</code>/<code>BUZ:PLAY</code>는 내부에서 스레드를 써서(비동기) 환경에 따라 실패할 수 있습니다. 이때 보드 REPL/시리얼 로그에 <code>[Buzzer] Error starting ...</code>가 찍히는지 확인하세요.</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="row">
+        <button id="connectBtn">블루투스 연결</button>
+        <span id="statusPill" class="pill bad">disconnected</span>
+        <button id="clearLogBtn">로그 지우기</button>
+    </div>
+
+    <div class="row">
+        <label><input type="checkbox" id="debugToggle"> JS 로그 debug</label>
+        <span class="small">(켜면 console이 더 많이 찍힙니다)</span>
+    </div>
+
+    <div class="row">
+        <button id="initBtn" disabled>BUZ:INIT</button>
+        <button id="stopBtn" disabled>BUZ:STOP</button>
+        <button id="pulseBtn" disabled>짧게 울림(ON 200ms)</button>
+    </div>
+
+    <div class="row">
+        <label>연속음 주파수(Hz)</label>
+        <input type="number" id="onFreq" min="100" max="8000" value="2000" style="width:90px;">
+        <button id="beepOnBtn" disabled>BUZ:BEEP:ON</button>
+    </div>
+
+    <div class="row">
+        <label>비프 count</label>
+        <input type="number" id="beepCount" min="1" max="20" value="3" style="width:70px;">
+        <label>freq(Hz)</label>
+        <input type="number" id="beepFreq" min="100" max="8000" value="2000" style="width:90px;">
+        <label>dur(ms)</label>
+        <input type="number" id="beepDur" min="10" max="2000" value="100" style="width:80px;">
+        <label>int(ms)</label>
+        <input type="number" id="beepInt" min="0" max="2000" value="100" style="width:80px;">
+        <button id="beepAsyncBtn" disabled>BUZ:BEEP</button>
+    </div>
+
+    <div class="row">
+        <label>멜로디</label>
+        <select id="melodyName">
+            <option value="TWINKLE">TWINKLE</option>
+            <option value="FUR_ELISE">FUR_ELISE</option>
+            <option value="SCHOOL_BELL">SCHOOL_BELL</option>
+            <option value="BEEP">BEEP</option>
+            <option value="SUCCESS">SUCCESS</option>
+            <option value="ERROR">ERROR</option>
+            <option value="ALERT">ALERT</option>
+        </select>
+        <label>tempo</label>
+        <input type="number" id="tempo" min="40" max="400" value="120" style="width:70px;">
+        <button id="playBtn" disabled>BUZ:PLAY</button>
+    </div>
+
+    <div class="row">
+        <label>Raw 명령</label>
+        <input type="text" id="rawCmd" value="BUZ:BEEP:1:2000:120:120" style="width: 260px;">
+        <button id="sendRawBtn" disabled>전송</button>
+    </div>
+
+    <div class="row">
+        <button id="scriptBtn" disabled>진단 시퀀스 실행</button>
+        <span class="small">STOP → 짧게 울림 → BEEP → PLAY → ON</span>
+    </div>
+
+    <div id="log"></div>
+
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const $ = (id) => document.getElementById(id);
+        const logArea = $('log');
+        const statusPill = $('statusPill');
+
+        function log(msg) {
+            const t = new Date().toLocaleTimeString();
+            logArea.textContent += `[${t}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        function setConnectedUI(connected) {
+            statusPill.textContent = connected ? 'connected' : 'disconnected';
+            statusPill.classList.toggle('ok', connected);
+            statusPill.classList.toggle('bad', !connected);
+            $('initBtn').disabled = !connected;
+            $('stopBtn').disabled = !connected;
+            $('pulseBtn').disabled = !connected;
+            $('beepOnBtn').disabled = !connected;
+            $('beepAsyncBtn').disabled = !connected;
+            $('playBtn').disabled = !connected;
+            $('sendRawBtn').disabled = !connected;
+            $('scriptBtn').disabled = !connected;
+        }
+
+        function sleep(ms) {
+            return new Promise((r) => setTimeout(r, ms));
+        }
+
+        let bleManager = null;
+        let buzzer = null;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' || typeof Buzzer === 'undefined') {
+                log('BLE 라이브러리 로드 실패. integratedBleLib_Camera.js를 확인하세요.');
+                return;
+            }
+
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+            buzzer = new Buzzer();
+
+            // 연결/해제 이벤트(가능한 경우 로그)
+            try {
+                bleManager.onConnected(() => log('BLE onConnected 이벤트'));
+                bleManager.onDisconnected(() => {
+                    log('BLE onDisconnected 이벤트');
+                    setConnectedUI(false);
+                });
+            } catch (e) {
+                // ignore
+            }
+
+            $('clearLogBtn').addEventListener('click', () => (logArea.textContent = ''));
+            $('debugToggle').addEventListener('change', () => {
+                try {
+                    const level = $('debugToggle').checked ? 'debug' : 'info';
+                    if (window.EZ_LOG && typeof window.EZ_LOG.setLevel === 'function') {
+                        window.EZ_LOG.setLevel(level);
+                        log(`EZ_LOG level = ${level}`);
+                    } else {
+                        log('EZ_LOG 객체가 없어 로그 레벨을 바꿀 수 없습니다.');
+                    }
+                } catch (e) {
+                    log('로그 레벨 변경 실패: ' + e.message);
+                }
+            });
+
+            $('connectBtn').addEventListener('click', handleConnect);
+            $('initBtn').addEventListener('click', handleInit);
+            $('stopBtn').addEventListener('click', () => sendRaw('BUZ:STOP'));
+            $('pulseBtn').addEventListener('click', handlePulse);
+            $('beepOnBtn').addEventListener('click', handleBeepOn);
+            $('beepAsyncBtn').addEventListener('click', handleBeepAsync);
+            $('playBtn').addEventListener('click', handlePlay);
+            $('sendRawBtn').addEventListener('click', () => sendRaw($('rawCmd').value));
+            $('scriptBtn').addEventListener('click', runDiagnosticScript);
+
+            setConnectedUI(false);
+            log('페이지 준비 완료');
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+            $('connectBtn').disabled = true;
+            log('블루투스 장치 선택/연결 중...');
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+                setConnectedUI(true);
+            } catch (e) {
+                log('연결 실패: ' + e.message);
+                $('connectBtn').disabled = false;
+                setConnectedUI(false);
+            }
+        }
+
+        async function handleInit() {
+            try {
+                log('→ BUZ:INIT');
+                await buzzer.init(); // 내부적으로 BUZ:INIT write
+                log('BUZ:INIT 전송 완료 (write ok). 이제 BEEP/PLAY 테스트하세요.');
+            } catch (e) {
+                log('BUZ:INIT 실패: ' + e.message);
+            }
+        }
+
+        async function handlePulse() {
+            // ON 200ms → STOP (PWM 경로가 살아있는지 빠르게 확인)
+            const f = parseInt($('onFreq').value || '2000', 10);
+            try {
+                log(`→ BUZ:BEEP:ON:${f} (200ms)`);
+                await buzzer.playBeepOn(f);
+                await sleep(200);
+                await sendRaw('BUZ:STOP');
+                log('짧게 울림 완료');
+            } catch (e) {
+                log('짧게 울림 실패: ' + e.message);
+            }
+        }
+
+        async function handleBeepOn() {
+            const f = parseInt($('onFreq').value || '2000', 10);
+            try {
+                log(`→ BUZ:BEEP:ON:${f}`);
+                await buzzer.playBeepOn(f);
+                log('BUZ:BEEP:ON 전송 완료 (write ok)');
+            } catch (e) {
+                log('BUZ:BEEP:ON 실패: ' + e.message);
+            }
+        }
+
+        async function handleBeepAsync() {
+            const count = parseInt($('beepCount').value || '1', 10);
+            const freq = parseInt($('beepFreq').value || '2000', 10);
+            const dur = parseInt($('beepDur').value || '100', 10);
+            const itv = parseInt($('beepInt').value || '100', 10);
+
+            // JS 라이브러리의 Buzzer.beep()는 결국 BUZ:BEEP:... 를 write 합니다.
+            try {
+                log(`→ BUZ:BEEP:${count}:${freq}:${dur}:${itv}`);
+                await buzzer.beep(count, freq, dur, itv);
+                log('BUZ:BEEP 전송 완료 (write ok). 소리가 안 나면 보드쪽 스레드 실패 가능성이 큽니다.');
+            } catch (e) {
+                log('BUZ:BEEP 실패: ' + e.message);
+            }
+        }
+
+        async function handlePlay() {
+            const name = String($('melodyName').value || 'TWINKLE').trim();
+            const tempo = parseInt($('tempo').value || '120', 10);
+            try {
+                log(`→ BUZ:PLAY:${name}:${tempo}`);
+                await buzzer.playMelody(name, tempo);
+                log('BUZ:PLAY 전송 완료 (write ok). 소리가 안 나면 보드쪽 스레드 실패/멜로디 처리 실패 가능.');
+            } catch (e) {
+                log('BUZ:PLAY 실패: ' + e.message);
+            }
+        }
+
+        async function sendRaw(cmd) {
+            const command = String(cmd || '').trim();
+            if (!command) return;
+            try {
+                log(`→ ${command}`);
+                // BUZZER_CHARACTERISTIC으로 직접 write (Buzzer 클래스 우회)
+                await bleManager.queueCommand(BUZZER_CHARACTERISTIC, command);
+                log(`전송 완료 (write ok): ${command}`);
+            } catch (e) {
+                log(`전송 실패: ${command} / ${e.message}`);
+            }
+        }
+
+        async function runDiagnosticScript() {
+            log('--- 진단 시퀀스 시작 ---');
+            log('권장: 이때 보드 REPL/시리얼 로그를 같이 켜고, [Buzzer] Error starting... 출력이 찍히는지 확인하세요.');
+            try {
+                await sendRaw('BUZ:STOP');
+                await sleep(150);
+                await handlePulse();
+                await sleep(250);
+                await handleBeepAsync();
+                await sleep(700);
+                await handlePlay();
+                await sleep(700);
+                await handleBeepOn();
+                await sleep(200);
+                await sendRaw('BUZ:STOP');
+            } finally {
+                log('--- 진단 시퀀스 종료 ---');
+            }
+        }
+    </script>
+</body>
+</html>
+

@@ -3149,7 +3149,7 @@ def buzzer_handler(conn_handle, cmd_str):
                 # BEEP 중복 체크 - 기본형
                 if buzzer_initialized:
                     if hasattr(buzzerModule, '_buzzer') and buzzerModule._buzzer:
-                        current_melody = buzzerModule._buzzer._current_melody_name
+                        current_melody = getattr(buzzerModule._buzzer, '_current_melody_name', None)
                         if current_melody == "BEEP":
                             logger.debug("BEEP already playing, ignoring", "BUZ")
                             return
@@ -3195,7 +3195,7 @@ def buzzer_handler(conn_handle, cmd_str):
                 # 🔥 PLAY 중복 체크 (기본형)
                 if buzzer_initialized:
                     if hasattr(buzzerModule, '_buzzer') and buzzerModule._buzzer:
-                        current_melody = buzzerModule._buzzer._current_melody_name
+                        current_melody = getattr(buzzerModule._buzzer, '_current_melody_name', None)
                         melody_name = cmd_str.split(":")[2].upper()
                         if current_melody == melody_name:
                             logger.debug("Same melody already playing, ignoring", "BUZ")
@@ -3276,7 +3276,7 @@ gc_interval = 5000  # 5초마다 GC 수행
 # - 캡처(무거움): 별도 스레드에서 수행
 # - BLE 전송(notify): 메인 루프에서 "조금씩" 처리하여 다른 센서/버저 명령 지연을 줄임
 CAM_CHUNK_SIZE = 160
-CAM_TX_MAX_CHUNKS_PER_TICK = 3  # 메인 루프 한 번에 보낼 청크 수(응답성/속도 트레이드오프)
+CAM_TX_MAX_CHUNKS_PER_TICK = 1  # 3에서 1로 줄여서 BLE 버퍼 부하 감소
 
 _cam_lock = _thread.allocate_lock()
 _cam_pending_frame = None          # 최신 프레임 1개만 유지 (큐 폭주 방지)
@@ -3409,13 +3409,35 @@ def _camera_tx_pump(max_chunks=CAM_TX_MAX_CHUNKS_PER_TICK):
                 end = min(_cam_tx_offset + CAM_CHUNK_SIZE, length)
                 chunk = _cam_tx_frame[_cam_tx_offset:end]
                 header = f"BIN{_cam_tx_seq}:".encode()
-                uart.cam_notify(header + chunk)
+                
+                # ENOMEM 방지를 위한 재시도 로직
+                retry = 3
+                while retry > 0:
+                    try:
+                        uart.cam_notify(header + chunk)
+                        break # 성공 시 루프 탈출
+                    except Exception as e:
+                        if "ENOMEM" in str(e) or "12" in str(e):
+                            retry -= 1
+                            time.sleep_ms(20) # BLE 버퍼가 비워질 때까지 대기
+                            if retry == 0: raise e
+                        else:
+                            raise e
+
                 _cam_tx_offset = end
                 _cam_tx_seq += 1
                 chunks_sent += 1
+                # 청크 간 아주 짧은 지연 추가
+                time.sleep_ms(5)
 
+            # NOTE:
+            # - 이전 구현은 청크를 1개만 보내도 Stage를 4(END)로 바꿔버려
+            #   프레임이 중간에 끊겨 전송되는 문제가 발생할 수 있습니다.
+            # - 모든 청크를 전송했을 때만 END를 보내도록 상태를 전이합니다.
             if _cam_tx_offset >= length:
                 _cam_tx_stage = 4
+            else:
+                _cam_tx_stage = 3
         except Exception as e:
             logger.error(f"Frame chunk send error: {e}", "CAM")
             _camera_abort_tx()
@@ -3618,7 +3640,8 @@ def disconnect_handler(conn_handle):
                 if hasattr(buzzerModule._buzzer, 'is_continuous') and buzzerModule._buzzer.is_continuous:
                     logger.info("Stopping continuous buzzer mode", "BUZ")
                     buzzerModule._buzzer.is_continuous = False
-                    buzzerModule._buzzer.pwm.duty_u16(0)
+                    if buzzerModule._buzzer.pwm:
+                        buzzerModule._buzzer.pwm.duty_u16(0)
             
             buzzerModule.stop()  # 재생 중지
             buzzerModule.deinit()  # 리소스 해제

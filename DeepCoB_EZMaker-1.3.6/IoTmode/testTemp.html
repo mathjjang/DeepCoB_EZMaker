@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE 블록코딩 테스트</title>
+    <!-- integratedBleLib.js 참조 -->
+    <script src="integratedBleLib.js"></script>
+    <style>
+        #lightLabel {
+            font-size: 16px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <button id="bleConnectBtn">연결</button>
+    <div><label id="lightLabel">조도센서 값: 측정 전</label></div>
+    
+    <script>
+        // BLE 매니저 인스턴스 가져오기
+        const bleManager = BLEManager.getInstance();
+        const connectBtn = document.getElementById('bleConnectBtn');
+        const lightLabel = document.getElementById('lightLabel');
+        let lightSensor = null;
+        let sensorDataTimer = null;
+        
+        // 센서 값 저장용 객체
+        const sensorValues = {
+            light: "측정 전"
+        };
+        
+        // 조도센서 초기화 함수
+        function initLightSensor(pinNum) {
+            // 이미 초기화되어 있으면 무시
+            if (lightSensor) return;
+            
+            console.log("조도센서 초기화 시작");
+            
+            // 조도센서 인스턴스 생성
+            lightSensor = new LightSensor();
+            
+            // 조도센서 핀 설정 (아날로그 핀 1 사용)
+            lightSensor.setPin(pinNum).then(() => {
+                console.log("조도센서 핀 설정 완료");
+            }).catch(err => {
+                console.error("조도센서 핀 설정 실패:", err);
+            });
+            
+            lightSensor.addEventListener('data', (data) => {
+                console.log("ttttttttttttttttttt", data);
+                sensorValues.light = data.analog;
+            });
+
+
+            
+            
+            console.log("조도센서 초기화 완료");
+        }
+        
+        // 센서 데이터를 요청하는 함수 (단순화)
+        function requestSensorData(sensorType) {
+            if (sensorType === 'light' && lightSensor && bleManager.isConnected) {
+                console.log("조도센서 상태 요청");
+                return lightSensor.getStatus().catch(error => {
+                    console.error("센서 데이터 요청 실패:", error);
+                });
+            }
+            
+            return Promise.resolve(false);
+        }
+        
+        // 센서 데이터를 반환하는 함수 (실제 요청은 하지 않음)
+        function getSensorData(sensorType) {
+            // 센서 타입에 따라 분기
+            if (sensorType === 'light') {
+                // 센서가 초기화되지 않았으면 먼저 초기화
+                if (!lightSensor) {
+                    initLightSensor(1);
+                }
+                
+                // 현재 저장된 센서 값 반환 (문자열)
+                return `조도센서 값: ${sensorValues.light}`;
+            }
+            
+            return "지원하지 않는 센서 타입";
+        }
+        
+        // 센서 타이머 중지
+        function stopSensorTimer() {
+            if (sensorDataTimer) {
+                clearInterval(sensorDataTimer);
+                sensorDataTimer = null;
+            }
+        }
+        
+        // 연결/해제 토글 버튼 이벤트 리스너
+        connectBtn.addEventListener('click', async () => {
+            if (bleManager.isConnected) {
+                // 연결 해제
+                bleManager.disconnect();
+            } else {
+                // 연결
+                try {
+                    await bleManager.connect();
+                } catch (error) {
+                    console.error('연결 실패:', error);
+                }
+            }
+        });
+        
+        // 연결 상태 변경 시 버튼 텍스트 업데이트
+        bleManager.onConnectionChange((connected) => {
+            connectBtn.textContent = connected ? '해제' : '연결';
+            
+            if (connected) {
+                console.log("BLE 연결됨 - 센서 초기화 시작");
+                // BLE 연결됨 - 조도센서 초기화
+                initLightSensor(1);
+                
+                // 기존 타이머가 있으면 제거
+                stopSensorTimer();
+                
+                // 초기 데이터 요청
+                //requestSensorData("light");
+
+                
+                
+                // 주기적인 데이터 요청 및 UI 업데이트 타이머
+                sensorDataTimer = setInterval(() => {
+                    if (bleManager.isConnected) {
+                        requestSensorData("light").then(() => {
+                            lightLabel.textContent = getSensorData("light");
+                        });
+                    } else {
+                        stopSensorTimer();
+                    }
+                }, 1000);
+            } else {
+                // BLE 연결 해제됨 - 정리 작업
+                lightSensor = null;
+                stopSensorTimer();
+                sensorValues.light = "측정 전";
+                lightLabel.textContent = '조도센서 값: 측정 전';
+            }
+        });
+        
+        // 페이지 로드 완료 시 실행
+        window.onload = function() {
+            console.log("페이지 로드 완료");
+            lightLabel.textContent = '조도센서 값: 측정 전';
+        };
+    </script>
+</body>
+</html> 

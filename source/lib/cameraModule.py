@@ -221,7 +221,7 @@ class CameraModule:
                 gc.collect()
                 
             # 실패 후 좀 더 긴 대기
-            time.sleep_ms(200)
+            time.sleep_ms(100)  #200
         
         logger.error("모든 프레임 캡처 시도 실패", "CAM")
         return None

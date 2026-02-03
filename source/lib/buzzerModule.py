@@ -81,6 +81,8 @@ SOUND_ALERT = [(NOTE_A4, '16'), (NOTE_A4, '16'), (NOTE_A4, '8')]
 # 버저 컨트롤러 클래스
 class BuzzerController:
     def __init__(self, pin=42):
+        # Ensure attribute exists even if init fails
+        self._current_melody_name = None
         try:
             self.is_continuous = False
             self._initialized = True
@@ -91,11 +93,15 @@ class BuzzerController:
             self._melody_stop_flag = False
             self._melody_thread_lock = _thread.allocate_lock()
             self.pin = machine.Pin(pin, machine.Pin.OUT)
-            self.pwm = machine.PWM(self.pin)
-            self.pwm.duty_u16(0)  # 시작 시 음소거
-            
-            # 🔥 추가: 현재 재생 중인 멜로디 이름 추적
-            self._current_melody_name = None
+            # Some boards can't use default PWM freq (often 5000Hz).
+            # Try safe frequency first, then fall back.
+            try:
+                self.pwm = machine.PWM(self.pin, freq=2000)
+                self.pwm.duty_u16(0)  # 시작 시 음소거
+            except Exception:
+                self.pwm = machine.PWM(self.pin)
+                self.pwm.freq(2000)
+                self.pwm.duty_u16(0)  # 시작 시 음소거
             
             print(f"[Buzzer] Initialized on pin {pin}")
         except Exception as e:

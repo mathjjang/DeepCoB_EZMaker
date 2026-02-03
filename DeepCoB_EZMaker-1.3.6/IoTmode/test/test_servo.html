@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>서보모터 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        button, input {
+            padding: 8px 12px;
+            margin: 4px 0;
+        }
+        #log {
+            margin-top: 12px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            height: 140px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>서보모터 테스트</h1>
+    <button id="connectBtn">블루투스 연결</button>
+    <div>
+        <label for="angleInput">각도 (0~180): </label>
+        <input type="number" id="angleInput" value="90" min="0" max="180">
+        <button id="setAngleBtn" disabled>각도 설정</button>
+    </div>
+
+    <div id="log"></div>
+
+    <!-- 통합 BLE 라이브러리 -->
+    <script src="integratedBleLib_Camera.js"></script>
+    <script>
+        const connectBtn  = document.getElementById('connectBtn');
+        const angleInput  = document.getElementById('angleInput');
+        const setAngleBtn = document.getElementById('setAngleBtn');
+        const logArea     = document.getElementById('log');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        let bleManager = null;
+        let servo      = null;
+
+        // 예시 기본 핀: 48 (D2, Servo 1). 실제 핀맵에 맞춰 수정 가능.
+        const DEFAULT_SERVO_PIN = 48;
+
+        window.addEventListener('load', () => {
+            if (typeof BLEManager === 'undefined' ||
+                typeof ServoMotor === 'undefined') {
+                log('BLE/Servo 라이브러리 로드 실패. 페이지를 새로고침 해보세요.');
+                return;
+            }
+
+            // 블록코드 스타일: 전역 객체 생성
+            // let servo = new ServoMotor();
+            bleManager = BLEManager.getInstance();
+            bleManager.init();
+            servo = new ServoMotor();
+
+            connectBtn.addEventListener('click', handleConnect);
+            setAngleBtn.addEventListener('click', handleSetAngle);
+        });
+
+        async function handleConnect() {
+            if (!navigator.bluetooth) {
+                log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다.');
+                return;
+            }
+
+            connectBtn.disabled = true;
+            setAngleBtn.disabled = true;
+            log('블루투스 장치 선택 중...');
+
+            try {
+                await bleManager.connect();
+                log('블루투스 연결 완료');
+
+                // 블록코드 패턴: servo.setPin(pinNum).then(...).catch(...)
+                log(`서보모터 핀을 GPIO ${DEFAULT_SERVO_PIN}으로 설정합니다.`);
+                servo.setPin(DEFAULT_SERVO_PIN).then(() => {
+                    log('서보모터 핀 설정 완료');
+                    setAngleBtn.disabled = false;
+                }).catch(err => {
+                    log('서보모터 핀 설정 실패: ' + err);
+                    connectBtn.disabled = false;
+                });
+            } catch (e) {
+                log('연결 또는 핀 설정 실패: ' + e.message);
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function handleSetAngle() {
+            try {
+                let angle = parseInt(angleInput.value, 10);
+                if (isNaN(angle)) {
+                    log('각도 입력이 올바르지 않습니다.');
+                    return;
+                }
+
+                // 0~180 범위로 제한
+                if (angle < 0) angle = 0;
+                if (angle > 180) angle = 180;
+                angleInput.value = angle;
+
+                await servo.setAngle(angle);
+                log(`서보모터 각도 설정: ${angle}도`);
+            } catch (e) {
+                log('서보모터 각도 설정 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
+
+
