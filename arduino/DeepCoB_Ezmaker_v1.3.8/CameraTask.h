@@ -49,7 +49,9 @@ private:
     volatile bool _snapshotRequested = false;
 
     uint32_t _streamIntervalMs = 200;
-    uint8_t _jpegQuality = 25;
+    // 0..63 (lower is better quality, larger JPEG)
+    // Default tuned for better visual quality while keeping BLE streaming workable.
+    uint8_t _jpegQuality = 18;  //25 -> 12 -> 18
     framesize_t _frameSize = FRAMESIZE_QVGA;
 
     // sequence for frames (per-frame, not per-chunk)

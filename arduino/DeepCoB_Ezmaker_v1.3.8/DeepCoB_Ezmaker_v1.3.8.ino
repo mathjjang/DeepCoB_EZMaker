@@ -1,5 +1,5 @@
 /**
- * @file DeepCoB_Ezmaker_v1.3.7.ino
+ * @file DeepCoB_Ezmaker_v1.3.8.ino
  * @brief Main entry point for DeepCoB_EZMaker Arduino firmware
  * 
  * This is the Arduino/FreeRTOS version of the MicroPython DeepCoB_EZMaker firmware.
@@ -26,7 +26,7 @@ void setup() {
   delay(1000);
   
   Serial.println("=================================");
-  Serial.println("DeepCoB_EZMaker v1.3.7 (Arduino)");
+  Serial.println("DeepCoB_EZMaker v1.3.8 (Arduino)");
   Serial.println("=================================");
   Serial.println();
   
@@ -54,17 +54,9 @@ void setup() {
   Serial.println(deviceName);
   Serial.println();
   
-  // Initialize Buzzer (fixed pin 42)
-  Serial.println("[MAIN] Initializing Buzzer...");
-  buzzer = new BuzzerController();
-  if (!buzzer->begin()) {
-    Serial.println("[MAIN] WARNING: Buzzer initialization failed!");
-  } else {
-    Serial.println("[MAIN] Buzzer initialized successfully");
-    // Test beep
-    buzzer->beep(2000, 100);
-  }
-  Serial.println();
+  // Buzzer is lazy-loaded (like other sensors).
+  // It will be initialized only when a BUZ:INIT command is received.
+  buzzer = nullptr;
   
   // Initialize Command Parser
   Serial.println("[MAIN] Initializing Command Parser...");
@@ -86,7 +78,7 @@ void setup() {
   
   // Connect components to command parser
   if (cameraTask) commandParser->setCameraTask(cameraTask);
-  if (buzzer) commandParser->setBuzzer(buzzer);
+  // NOTE: buzzer pointer is created/owned lazily inside the command parser on BUZ:INIT
   
   Serial.println("[MAIN] Setup complete!");
   Serial.println("[MAIN] Waiting for BLE connection...");

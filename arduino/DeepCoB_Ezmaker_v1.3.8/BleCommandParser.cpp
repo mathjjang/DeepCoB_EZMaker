@@ -92,13 +92,21 @@ void BleCommandParser::handleCameraCommand(const char* cmd) {
 }
 
 void BleCommandParser::handleBuzzerCommand(const char* cmd) {
-    if (!_buzzer) {
-        sendResponse("BUZ:ERROR:NOT_INITIALIZED");
+    if (strcmp(cmd, "BUZ:INIT") == 0) {
+        // Lazy init: create and initialize buzzer only when requested
+        if (_buzzer == nullptr) {
+            _buzzer = new BuzzerController();
+            if (!_buzzer->begin()) {
+                sendResponse("BUZ:INIT:ERROR");
+                return;
+            }
+        }
+        sendResponse("BUZ:INIT:OK");
         return;
     }
 
-    if (strcmp(cmd, "BUZ:INIT") == 0) {
-        sendResponse("INITIALIZED");
+    if (!_buzzer) {
+        sendResponse("BUZ:ERROR:NOT_INITIALIZED");
         return;
     }
 
