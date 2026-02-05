@@ -282,10 +282,11 @@ bool CameraTask::sendFrame(camera_fb_t* fb, bool isStreamFrame) {
 }
 
 bool CameraTask::sendFrameChunks(const uint8_t* jpeg, size_t len, bool isStreamFrame, uint16_t frameSeq) {
-    // Use legacy single-channel CAM characteristic (IoT service) so the old MicroPython JS works unchanged.
-    // Fallback to CAFE TX if legacy is not available (shouldn't happen in normal builds).
-    NimBLECharacteristic* tx = _bleServer->getLegacyCamChar();
-    if (!tx) tx = _bleServer->getCamTxChar();
+    // Prefer dedicated Camera TX characteristic (separate service), fallback to legacy CAM char.
+    // This enables TX/RX separation while keeping backward compatibility.
+    NimBLECharacteristic* camTx = _bleServer->getCamTxChar();
+    NimBLECharacteristic* legacyTx = _bleServer->getLegacyCamChar();
+    NimBLECharacteristic* tx = camTx ? camTx : legacyTx;
     if (!tx || !jpeg || len == 0) return false;
     const uint16_t connHandle = _bleServer->getConnHandle();
     if (connHandle == BLE_HS_CONN_HANDLE_NONE) return false;
@@ -313,6 +314,11 @@ bool CameraTask::sendFrameChunks(const uint8_t* jpeg, size_t len, bool isStreamF
         if (allowAbort()) return false;
         const size_t n = strlen(s);
         bool ok = tx->notify((const uint8_t*)s, n, connHandle);
+        // If the dedicated camera TX isn't subscribed/ready, fall back to legacy channel.
+        if (!ok && tx == camTx && legacyTx) {
+            tx = legacyTx;
+            ok = tx->notify((const uint8_t*)s, n, connHandle);
+        }
         if (!ok) {
             for (int i = 0; i < 3 && !ok; i++) {
                 if (allowAbort()) return false;
@@ -366,6 +372,10 @@ bool CameraTask::sendFrameChunks(const uint8_t* jpeg, size_t len, bool isStreamF
         memcpy(out + hdrLen, jpeg + offset, payloadLen);
 
         bool ok = tx->notify(out, (size_t)hdrLen + payloadLen, connHandle);
+        if (!ok && tx == camTx && legacyTx) {
+            tx = legacyTx;
+            ok = tx->notify(out, (size_t)hdrLen + payloadLen, connHandle);
+        }
         if (!ok) {
             // ENOMEM/backpressure style retry (MicroPython-like)
             for (int i = 0; i < 3 && !ok; i++) {

@@ -173,6 +173,12 @@ void BleServer::onCharacteristicWrite(NimBLECharacteristic* source, const uint8_
 }
 
 void BleServer::onCameraRxWrite(const uint8_t* data, size_t length) {
+    // Camera RX is WRITE-only (no notify). Route responses to CAM_STATUS (notify).
+    // This allows true TX/RX separation:
+    // - CAM_RX: client -> device (commands)
+    // - CAM_STATUS: device -> client (responses/diagnostics)
+    _pLastRxChar = _pCamStatusChar;
+
     // Reuse the same command parser (camera commands are still text-based control)
     if (_commandParser != nullptr) {
         _commandParser->parseCommand(data, length);

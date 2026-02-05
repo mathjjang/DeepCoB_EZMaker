@@ -96,10 +96,16 @@ try {
 // BLE Service UUIDs
 const IOT_SERVICE = '11112222-3333-4444-5555-666677778888';
 const SENSOR_SERVICE = '11112222-3333-4444-5555-66667777888c';
+// Camera service (TX/RX split)
+const CAMERA_SERVICE = 'cafe0000-1111-2222-3333-444455556666';
 
 // 캐릭터리스틱 UUID 상수 - 직접 접근용
 const LED_CHARACTERISTIC = '11112222-3333-4444-5555-666677778889';
 const CAM_CHARACTERISTIC = '11112222-3333-4444-5555-66667777888a';
+// Camera service characteristics
+const CAMERA_TX_CHARACTERISTIC = 'cafe0001-1111-2222-3333-444455556666';
+const CAMERA_RX_CHARACTERISTIC = 'cafe0002-1111-2222-3333-444455556666';
+const CAMERA_STATUS_CHARACTERISTIC = 'cafe0003-1111-2222-3333-444455556666';
 const ULTRA_CHARACTERISTIC = '11112222-3333-4444-5555-66667777888b';
 const DHT_CHARACTERISTIC = '11112222-3333-4444-5555-66667777888d';
 const SERVO_CHARACTERISTIC = '11112222-3333-4444-5555-66667777888e';
@@ -177,7 +183,12 @@ const EZ_I2C_SCL_PIN = 40; // 공통 I2C SCL (예: D5 / GPIO 40)
 const CHARACTERISTIC_UUIDS = {
     // IoT 모드 특성
     led: LED_CHARACTERISTIC,
+    // Legacy camera (single-channel, MicroPython compatible)
     camera: CAM_CHARACTERISTIC,
+    // Camera service (TX/RX split)
+    cameraTx: CAMERA_TX_CHARACTERISTIC,
+    cameraRx: CAMERA_RX_CHARACTERISTIC,
+    cameraStatus: CAMERA_STATUS_CHARACTERISTIC,
     light: LIGHT_CHARACTERISTIC,
     ultrasonic: ULTRA_CHARACTERISTIC,
     dht: DHT_CHARACTERISTIC,
@@ -215,6 +226,7 @@ const CHARACTERISTIC_UUIDS = {
 // 서비스별 포함 특성 매핑
 const SERVICE_CHARACTERISTICS = {
     [IOT_SERVICE]: [LED_CHARACTERISTIC, CAM_CHARACTERISTIC, REPL_CHARACTERISTIC],
+    [CAMERA_SERVICE]: [CAMERA_TX_CHARACTERISTIC, CAMERA_RX_CHARACTERISTIC, CAMERA_STATUS_CHARACTERISTIC],
     [SENSOR_SERVICE]: [ULTRA_CHARACTERISTIC, DHT_CHARACTERISTIC, SERVO_CHARACTERISTIC,
         NEOPIXEL_CHARACTERISTIC, TOUCH_CHARACTERISTIC, LIGHT_CHARACTERISTIC,
         BUZZER_CHARACTERISTIC, GYRO_CHARACTERISTIC, DUST_CHARACTERISTIC,
@@ -231,12 +243,16 @@ const SERVICE_CHARACTERISTICS = {
 // 하위 호환성을 위해 전역 변수로도 노출
 window.IOT_SERVICE = IOT_SERVICE;
 window.SENSOR_SERVICE = SENSOR_SERVICE;
+window.CAMERA_SERVICE = CAMERA_SERVICE;
 window.LED_CHARACTERISTIC = LED_CHARACTERISTIC;
 window.BUZZER_CHARACTERISTIC = BUZZER_CHARACTERISTIC;
 window.SERVO_CHARACTERISTIC = SERVO_CHARACTERISTIC;
 window.DCMOTOR_CHARACTERISTIC = DCMOTOR_CHARACTERISTIC;
 window.NEOPIXEL_CHARACTERISTIC = NEOPIXEL_CHARACTERISTIC;
 window.CAM_CHARACTERISTIC = CAM_CHARACTERISTIC;
+window.CAMERA_TX_CHARACTERISTIC = CAMERA_TX_CHARACTERISTIC;
+window.CAMERA_RX_CHARACTERISTIC = CAMERA_RX_CHARACTERISTIC;
+window.CAMERA_STATUS_CHARACTERISTIC = CAMERA_STATUS_CHARACTERISTIC;
 window.LIGHT_CHARACTERISTIC = LIGHT_CHARACTERISTIC;
 window.ULTRA_CHARACTERISTIC = ULTRA_CHARACTERISTIC;
 window.DHT_CHARACTERISTIC = DHT_CHARACTERISTIC;
@@ -572,8 +588,17 @@ class BLECore {
                 // 서비스를 찾지 못해도 계속 진행
             }
 
+            // Camera service 초기화 (TX/RX 분리; optional)
+            try {
+                this.services.cameraService = await this.server.getPrimaryService(CAMERA_SERVICE);
+                console.log("카메라 서비스 초기화 성공");
+            } catch (error) {
+                console.warn("카메라 서비스를 찾을 수 없습니다:", error.message);
+                // 서비스를 찾지 못해도 계속 진행
+            }
+
             // 최소한 하나의 서비스라도 초기화되었는지 확인
-            if (!this.services.iotService && !this.services.sensorService) {
+            if (!this.services.iotService && !this.services.sensorService && !this.services.cameraService) {
                 console.error("필수 서비스를 찾을 수 없습니다");
                 // 서비스가 하나도 없으면 경고만 하고 진행
             }
@@ -608,6 +633,7 @@ class BLECore {
             // IoT와 REPL 모드의 모든 서비스 UUID 추가
             const services = [
                 IOT_SERVICE,
+                CAMERA_SERVICE,
                 SENSOR_SERVICE,
                 REPL_SERVICE,
                 ...requiredServices
@@ -857,6 +883,13 @@ class BLECore {
             serviceUUID = SENSOR_SERVICE;
         }
 
+        // Camera service characteristics
+        if (characteristicUUID === CAMERA_TX_CHARACTERISTIC ||
+            characteristicUUID === CAMERA_RX_CHARACTERISTIC ||
+            characteristicUUID === CAMERA_STATUS_CHARACTERISTIC) {
+            serviceUUID = CAMERA_SERVICE;
+        }
+
         console.log(`[BLECore:DEBUG] UUID ${characteristicUUID}에 대한 서비스 판별 결과: ${serviceUUID}`);
         return serviceUUID;
     }
@@ -1039,6 +1072,10 @@ class SensorBase {
 
         this.name = name;
         this.characteristicUUID = characteristicUUID;
+        // TX/RX split support:
+        // - characteristicUUID: write/command characteristic
+        // - notifyCharacteristicUUID: notify/stream characteristic (defaults to write characteristic)
+        this.notifyCharacteristicUUID = options.notifyCharacteristicUUID || characteristicUUID;
         // 고빈도 데이터(카메라 등)는 중앙 디스패치(onDataReceived) 경로를 끄고,
         // characteristicvaluechanged(알림 이벤트) 한 경로만 타도록 할 수 있다.
         this._useCentralOnDataReceived = (options.useCentralOnDataReceived !== false);
@@ -1056,7 +1093,8 @@ class SensorBase {
     _setupNotifications() {
         // Console 디버깅
         EZ_LOG.debug(`[DEBUG] ${this.name} 센서의 _setupNotifications 호출됨`);
-        EZ_LOG.debug(`[DEBUG] ${this.name} 특성 UUID: ${this.characteristicUUID}`);
+        EZ_LOG.debug(`[DEBUG] ${this.name} 특성 UUID(write): ${this.characteristicUUID}`);
+        EZ_LOG.debug(`[DEBUG] ${this.name} 특성 UUID(notify): ${this.notifyCharacteristicUUID}`);
 
         if (!this.bleManager) {
             EZ_LOG.error(`[DEBUG] ${this.name}: BLEManager 인스턴스가 없습니다`);
@@ -1073,8 +1111,8 @@ class SensorBase {
             EZ_LASER_CHARACTERISTIC  // 레이저 모듈도 알림을 필수로 사용하지 않음 (제어용)
         ];
 
-        if (notifyNotSupported.includes(this.characteristicUUID)) {
-            EZ_LOG.debug(`[DEBUG] ${this.name}: 이 센서(${this.characteristicUUID})는 알림을 지원하지 않습니다. 알림 설정 건너뜁니다.`);
+        if (notifyNotSupported.includes(this.notifyCharacteristicUUID)) {
+            EZ_LOG.debug(`[DEBUG] ${this.name}: 이 센서(${this.notifyCharacteristicUUID})는 알림을 지원하지 않습니다. 알림 설정 건너뜁니다.`);
             return;
         }
 
@@ -1103,11 +1141,11 @@ class SensorBase {
         const self = this;
         try {
             EZ_LOG.debug(`[DEBUG] ${this.name}: 특성 알림 시작 시도`);
-            this.bleManager.startNotifications(this.characteristicUUID, function (data) {
+            this.bleManager.startNotifications(this.notifyCharacteristicUUID, function (data) {
                 // 고빈도 데이터(카메라 청크 등)는 debug로만 출력
                 EZ_LOG.debug(`[DEBUG] ${self.name} 알림 콜백 호출됨`);
                 // 데이터 형식 일관성 유지
-                self._processData({ data: data, characteristicUUID: self.characteristicUUID });
+                self._processData({ data: data, characteristicUUID: self.notifyCharacteristicUUID });
             }).then(() => {
                 EZ_LOG.debug(`[DEBUG] ${self.name}: 특성 알림 시작 성공`);
             }).catch(error => {
@@ -1118,7 +1156,7 @@ class SensorBase {
             // NOTE: 카메라처럼 고빈도 스트림은 중복 처리 가능성을 줄이기 위해 비활성화 권장
             if (this._useCentralOnDataReceived) {
                 this.bleManager.onDataReceived(function (data) {
-                    if (data.characteristicUUID === self.characteristicUUID) {
+                    if (data.characteristicUUID === self.notifyCharacteristicUUID) {
                         EZ_LOG.debug(`[DEBUG] ${self.name} onDataReceived 콜백 호출됨`);
                         self._processData(data); // 데이터 형식 일관성 유지
                     }
@@ -2261,7 +2299,16 @@ class Camera extends SensorBase {
         // 카메라는 notify 빈도가 매우 높으므로,
         // onDataReceived(중앙 디스패치)까지 같이 타면 환경에 따라 중복 처리될 수 있음.
         // 따라서 characteristicvaluechanged 경로만 사용하도록 중앙 디스패치 경로를 끈다.
-        super('Camera', CAM_CHARACTERISTIC, { useCentralOnDataReceived: false });
+        // Prefer TX/RX split camera service:
+        // - write commands on CAMERA_RX
+        // - receive frames on CAMERA_TX
+        // Fallback to legacy CAM_CHARACTERISTIC is set up below.
+        super('Camera', CAMERA_RX_CHARACTERISTIC, {
+            useCentralOnDataReceived: false,
+            notifyCharacteristicUUID: CAMERA_TX_CHARACTERISTIC
+        });
+
+        this._legacyWriteUUID = CAM_CHARACTERISTIC;
 
         // 카메라 상태 및 이미지 관련 변수
         this.isStreaming = false;
@@ -2279,6 +2326,68 @@ class Camera extends SensorBase {
 
         // 로깅
         EZ_LOG.info("[Camera] 카메라 모듈 초기화됨");
+
+        // Backward compatibility: also listen on legacy CAM characteristic (single-channel).
+        this._setupLegacyFallbackNotifications();
+
+        // Status channel (responses/diagnostics like MTU)
+        this._setupStatusNotifications();
+    }
+
+    /**
+     * Legacy fallback notifications (single-channel CAM characteristic).
+     * - Old firmware / MicroPython-compatible path
+     */
+    _setupLegacyFallbackNotifications() {
+        const self = this;
+        try {
+            if (!this.bleManager) return;
+            this.bleManager.startNotifications(CAM_CHARACTERISTIC, function (data) {
+                self._processData({ data: data, characteristicUUID: CAM_CHARACTERISTIC });
+            }).catch(() => {
+                // ignore (firmware may not expose legacy CAM char)
+            });
+        } catch (_) {
+            // ignore
+        }
+    }
+
+    /**
+     * Camera status notifications (responses/diagnostics).
+     */
+    _setupStatusNotifications() {
+        const self = this;
+        try {
+            if (!this.bleManager) return;
+            this.bleManager.startNotifications(CAMERA_STATUS_CHARACTERISTIC, function (data) {
+                try {
+                    const value = data && typeof data.getUint8 === 'function'
+                        ? new TextDecoder().decode(new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)))
+                        : '';
+                    if (value && self.onDebugLog) {
+                        self.onDebugLog(`[CAM_STATUS] ${value}`, { characteristicUUID: CAMERA_STATUS_CHARACTERISTIC });
+                    }
+                } catch (_) {
+                    // ignore
+                }
+            }).catch(() => {
+                // ignore (status characteristic may be absent)
+            });
+        } catch (_) {
+            // ignore
+        }
+    }
+
+    /**
+     * Override: try camera RX first, fallback to legacy CAM write.
+     */
+    async sendCommand(command) {
+        try {
+            return await this.bleManager.queueCommand(this.characteristicUUID, command);
+        } catch (error) {
+            EZ_LOG.warn(`[Camera] CAM_RX 전송 실패 → legacy CAM로 재시도: ${error.message}`);
+            return await this.bleManager.queueCommand(this._legacyWriteUUID, command);
+        }
     }
 
     /**
