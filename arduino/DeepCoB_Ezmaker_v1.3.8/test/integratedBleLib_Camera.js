@@ -2299,16 +2299,13 @@ class Camera extends SensorBase {
         // 카메라는 notify 빈도가 매우 높으므로,
         // onDataReceived(중앙 디스패치)까지 같이 타면 환경에 따라 중복 처리될 수 있음.
         // 따라서 characteristicvaluechanged 경로만 사용하도록 중앙 디스패치 경로를 끈다.
-        // Prefer TX/RX split camera service:
+        // TX/RX split camera service (v1.3.8+):
         // - write commands on CAMERA_RX
         // - receive frames on CAMERA_TX
-        // Fallback to legacy CAM_CHARACTERISTIC is set up below.
         super('Camera', CAMERA_RX_CHARACTERISTIC, {
             useCentralOnDataReceived: false,
             notifyCharacteristicUUID: CAMERA_TX_CHARACTERISTIC
         });
-
-        this._legacyWriteUUID = CAM_CHARACTERISTIC;
 
         // 카메라 상태 및 이미지 관련 변수
         this.isStreaming = false;
@@ -2327,29 +2324,8 @@ class Camera extends SensorBase {
         // 로깅
         EZ_LOG.info("[Camera] 카메라 모듈 초기화됨");
 
-        // Backward compatibility: also listen on legacy CAM characteristic (single-channel).
-        this._setupLegacyFallbackNotifications();
-
         // Status channel (responses/diagnostics like MTU)
         this._setupStatusNotifications();
-    }
-
-    /**
-     * Legacy fallback notifications (single-channel CAM characteristic).
-     * - Old firmware / MicroPython-compatible path
-     */
-    _setupLegacyFallbackNotifications() {
-        const self = this;
-        try {
-            if (!this.bleManager) return;
-            this.bleManager.startNotifications(CAM_CHARACTERISTIC, function (data) {
-                self._processData({ data: data, characteristicUUID: CAM_CHARACTERISTIC });
-            }).catch(() => {
-                // ignore (firmware may not expose legacy CAM char)
-            });
-        } catch (_) {
-            // ignore
-        }
     }
 
     /**
@@ -2379,15 +2355,10 @@ class Camera extends SensorBase {
     }
 
     /**
-     * Override: try camera RX first, fallback to legacy CAM write.
+     * Override: send commands only on CAMERA_RX (TX/RX split).
      */
     async sendCommand(command) {
-        try {
-            return await this.bleManager.queueCommand(this.characteristicUUID, command);
-        } catch (error) {
-            EZ_LOG.warn(`[Camera] CAM_RX 전송 실패 → legacy CAM로 재시도: ${error.message}`);
-            return await this.bleManager.queueCommand(this._legacyWriteUUID, command);
-        }
+        return await this.bleManager.queueCommand(this.characteristicUUID, command);
     }
 
     /**
